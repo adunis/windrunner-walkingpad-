@@ -15,6 +15,7 @@
 -- /wr miles     switch km / miles
 -- /wr warn      toggle the warning      /wr hardcore  toggle Hardcore
 -- /wr sync      show or hide the sync squares (App mode needs them)
+-- /wr lore      toggle lore subtitles   /wr every 0.5  lore every 0.5 km   /wr testlore  preview
 -- /wr debug     treadmill link status
 --
 -- Treadmill link: WalkingPad Control sends the real belt speed once a second as 7 taps of
@@ -31,7 +32,8 @@ local DEFAULTS = {
   warn = true, hardcore = true,
   speed = 3.0,                                     -- Manual mode belt speed (km/h)
   idle = 1.0, walk = 3.0, run = 5.0, mount = 6.0,  -- App mode belt speeds (km/h)
-  expanded = false, runFrom = 4.5,     -- figure runs from this belt speed
+  expanded = false, runFrom = 4.5,     -- figure runs / distance counts as "run" from this belt speed
+  lore = true, loreEvery = 0.5,        -- lore subtitles every this many km (or miles)
   session = nil, sessions = {},
 }
 local DB
@@ -210,6 +212,126 @@ local function updateSquares(st)
   local kmh = wantedBelt(st)
   sq[3]:SetColorTexture(0x5A / 255, math.floor(kmh * 10 + 0.5) / 255, req / 255, 1)
 end
+
+---------------------------------------------------------------------------------
+-- Lore subtitles: original lines in the spirit of Azeroth, shown every N km
+---------------------------------------------------------------------------------
+local LORE = {
+  walk = {
+    { "The road does not care how fast you walk. Only that you do not stop.", "Farstrider saying" },
+    { "Every great journey across Azeroth began with a single, unremarkable step.", "Explorers' League ledger" },
+    { "Patience is a blade that never dulls.", "Old Kaldorei proverb" },
+    { "The mountain does not hurry, yet it outlasts every empire built upon it.", "Ironforge stonecutters' saying" },
+    { "Count the steps, not the leagues. The leagues will count themselves.", "Pandaren road wisdom" },
+    { "The Light does not ask for haste. It asks for resolve.", "Teaching of the Silver Hand" },
+    { "Roads remember the feet that wore them smooth.", "Tauren elder of Mulgore" },
+    { "The tide returns to the shore a thousand times. So must you return to the path.", "Kul Tiran sailors' saying" },
+    { "Strength is not the absence of weariness. It is the next step, taken in spite of it.", "Orcish grunt's creed" },
+    { "The slowest caravan still crosses the Barrens, if it never turns back.", "Horde caravan master" },
+    { "Earth beneath, sky above, and the long road between. That is enough.", "Shamanistic teaching" },
+    { "A sentinel's watch is measured not in hours, but in steps unwavering.", "Oath of the Sentinels" },
+    { "The forest grows one ring each year, and no one calls it slow.", "Cenarion Circle saying" },
+    { "Walk with purpose, and the land itself will make way.", "Highmountain proverb" },
+    { "A pilgrim's boots wear thin long before a pilgrim's faith.", "Chronicle of the Cathedral of Light" },
+    { "The dead walk without rest. The living may at least choose their road.", "Forsaken deathguard" },
+  },
+  run = {
+    { "Speed is a weapon. Wield it before the enemy knows you have drawn it.", "Ranger-General's maxim" },
+    { "Run, and let the wind carry your name across the Eastern Kingdoms.", "Silvermoon courier's oath" },
+    { "The wolf does not ask the plains for permission to run.", "Frostwolf proverb" },
+    { "Fortune favours the swift. The grave favours the hesitant.", "Stormwind cavalry motto" },
+    { "Faster. The darkness does not rest, and neither shall we.", "Argent Crusade field order" },
+    { "Your heart is a war drum. Let it set the pace.", "Mag'har chant" },
+    { "Outrun the storm, and you become the storm.", "Windrunner creed" },
+    { "Breath of fire, legs of iron, will of stone.", "Dwarven runner's chant" },
+    { "The hunt rewards those who arrive first.", "Huntress of Darnassus" },
+    { "Let them try to follow.", "Ravenholdt saying" },
+    { "Swift as the gryphon's shadow over the Wetlands.", "Wildhammer saying" },
+    { "Every stride is a promise kept to those who fell behind.", "Saying of the Valarjar" },
+    { "Run until the ground forgets you were ever standing still.", "Thunder Bluff trail runner" },
+  },
+  milestone = {
+    { "Legends are not born. They are walked, one league at a time.", "Inscription in the Hall of Champions" },
+    { "The banners still fly. The march goes on.", "Alliance war chronicle" },
+    { "Even the ancients would take notice of such a journey.", "Keeper of the Grove" },
+    { "Lok'tar! The road bows before you.", "Warsong war cry" },
+    { "Your deeds will be sung in the halls of the Earthen Ring.", "Earthen Ring elder" },
+  },
+}
+
+local sub = CreateFrame("Frame", "WindrunnerSubtitle", UIParent)
+sub:SetSize(760, 90)
+sub:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 170)
+sub:SetFrameStrata("HIGH")
+sub:EnableMouse(false)
+sub:Hide()
+local subShade = sub:CreateTexture(nil, "BACKGROUND")
+subShade:SetPoint("CENTER", sub, "CENTER", 0, 4)
+subShade:SetSize(620, 74)
+subShade:SetColorTexture(0, 0, 0, 0.35)
+if subShade.SetGradient and CreateColor then        -- soft edges where supported
+  pcall(function() subShade:SetGradient("HORIZONTAL", CreateColor(0, 0, 0, 0), CreateColor(0, 0, 0, 0.45)) end)
+end
+local SUBFONT = (GameFontNormal and GameFontNormal.GetFont and GameFontNormal:GetFont()) or STANDARD_TEXT_FONT
+  or "Fonts\\FRIZQT__.TTF"
+local subQuote = sub:CreateFontString(nil, "OVERLAY")
+subQuote:SetFont(SUBFONT, 17, "OUTLINE")
+subQuote:SetPoint("TOP", sub, "TOP", 0, -6)
+subQuote:SetWidth(720)
+subQuote:SetJustifyH("CENTER")
+subQuote:SetTextColor(0.96, 0.93, 0.85)
+subQuote:SetShadowOffset(1, -1)
+local subWho = sub:CreateFontString(nil, "OVERLAY")
+subWho:SetFont(SUBFONT, 12, "OUTLINE")
+subWho:SetPoint("TOP", subQuote, "BOTTOM", 0, -6)
+subWho:SetTextColor(1, 0.82, 0.25)
+local subStat = sub:CreateFontString(nil, "OVERLAY")
+subStat:SetFont(SUBFONT, 11, "OUTLINE")
+subStat:SetPoint("TOP", subWho, "BOTTOM", 0, -4)
+subStat:SetTextColor(0.7, 0.7, 0.7)
+
+local SUB_IN, SUB_HOLD, SUB_OUT = 0.8, 7.0, 1.6
+local subT = 0
+sub:SetScript("OnUpdate", function(self, dt)
+  subT = subT + dt
+  local a
+  if subT < SUB_IN then a = subT / SUB_IN
+  elseif subT < SUB_IN + SUB_HOLD then a = 1
+  elseif subT < SUB_IN + SUB_HOLD + SUB_OUT then a = 1 - (subT - SUB_IN - SUB_HOLD) / SUB_OUT
+  else self:Hide(); return end
+  self:SetAlpha(a)
+end)
+
+local recentLore = {}
+local function pickLore(kind)
+  local pool = LORE[kind]
+  local choices = {}
+  for i, q in ipairs(pool) do
+    if not recentLore[kind .. i] then choices[#choices + 1] = i end
+  end
+  if #choices == 0 then                      -- all used: new cycle, but never the line just shown
+    for i in ipairs(pool) do
+      recentLore[kind .. i] = nil
+      if i ~= recentLore[kind .. "last"] then choices[#choices + 1] = i end
+    end
+  end
+  local i = choices[math.random(#choices)]
+  recentLore[kind .. i] = true
+  recentLore[kind .. "last"] = i
+  return pool[i]
+end
+
+local function showLore(kind, statLine)
+  local q = pickLore(kind)
+  subQuote:SetText("\"" .. q[1] .. "\"")
+  subWho:SetText("— " .. q[2])
+  subStat:SetText(statLine or "")
+  subT = 0
+  sub:SetAlpha(0)
+  sub:Show()
+  return q
+end
+Windrunner_ShowLore = showLore     -- for testing / previews
 
 ---------------------------------------------------------------------------------
 -- Window: compact view (figure, time, "X km You / Y km Name"); right-click or + expands
@@ -404,7 +526,7 @@ lockFs:SetJustifyH("RIGHT")
 local more = CreateFrame("Frame", nil, ui)
 more:SetPoint("TOPLEFT", ui, "TOPLEFT", 0, -COMPACT_H)
 more:SetPoint("TOPRIGHT", ui, "TOPRIGHT", 0, -COMPACT_H)
-more:SetHeight(100)
+more:SetHeight(122)
 local sep = more:CreateTexture(nil, "ARTWORK")
 sep:SetColorTexture(1, 1, 1, 0.08)
 sep:SetPoint("TOPLEFT", 8, 0); sep:SetPoint("TOPRIGHT", -8, 0); sep:SetHeight(1)
@@ -426,6 +548,7 @@ local function walkingNow() return DB.session ~= nil and not DB.session.paused e
 
 local function newSession(auto)
   DB.session = { active = true, paused = false, time = 0, real = 0, char = 0, foot = 0, started = time(),
+                 walked = 0, ran = 0, nextLore = DB.loreEvery,
                  warmup = GetTime() + (DB.mode == "app" and COUNTDOWN or 0) }
   if auto then say("you started moving: session started, the treadmill is starting.") end
 end
@@ -444,11 +567,11 @@ local function endSession()
   if s.time >= 30 then
     table.insert(DB.sessions, 1, {
       date = date("%Y-%m-%d %H:%M", s.started), time = s.time, real = s.real,
-      char = s.char, foot = s.foot, mode = DB.mode,
+      char = s.char, foot = s.foot, mode = DB.mode, walked = s.walked or 0, ran = s.ran or 0,
     })
     while #DB.sessions > 200 do table.remove(DB.sessions) end
-    say(string.format("session saved: %s, %s walked. Your character travelled %s (%s on foot).",
-      fmtTime(s.time), fmtDist(s.real), fmtDist(s.char), fmtDist(s.foot)))
+    say(string.format("session saved: %s, %s (%s walked, %s run). Your character travelled %s (%s on foot).",
+      fmtTime(s.time), fmtDist(s.real), fmtDist(s.walked or 0), fmtDist(s.ran or 0), fmtDist(s.char), fmtDist(s.foot)))
   else
     say("session under 30 seconds, not saved.")
   end
@@ -526,6 +649,10 @@ local hardcoreHelp = function()
 end
 
 local warnBox = checkbox("Warn when my character moves without me", -57, "warn")
+local loreBox = checkbox("Lore messages", -100, "lore", function()
+  say(DB.lore and string.format("lore messages on: one every %s %s. Change with /wr every <number>.",
+    DB.loreEvery, DB.units == "mi" and "mi" or "km") or "lore messages off.")
+end)
 local hardBox = checkbox("Hardcore: can't move unless I walk", -76, "hardcore", function()
   say(DB.hardcore and ("|cffff3333Hardcore on|r: " .. hardcoreHelp() .. " In combat you can always move.")
     or "Hardcore off.")
@@ -562,6 +689,14 @@ ui:SetScript("OnEnter", function(self)
   local s = DB.session
   if s and s.real > 0.01 then
     GameTooltip:AddLine(string.format("Your character went %.1fx as far as you", s.char / s.real), 0.8, 0.8, 0.8)
+  end
+  if s and s.real > 0.001 then
+    GameTooltip:AddLine(string.format("This session: %s walked, %s run", fmtDist(s.walked or 0), fmtDist(s.ran or 0)), 1, 1, 1)
+  end
+  local tw, tr = 0, 0
+  for _, x in ipairs(DB.sessions) do tw = tw + (x.walked or 0); tr = tr + (x.ran or 0) end
+  if tw + tr > 0 then
+    GameTooltip:AddLine(string.format("All time: %s walked, %s run", fmtDist(tw), fmtDist(tr)), 0.8, 0.8, 0.8)
   end
   GameTooltip:AddLine("Right-click or + for controls. Drag to move. /wr for commands.", 0.6, 0.6, 0.6, true)
   GameTooltip:Show()
@@ -649,7 +784,7 @@ refresh = function()
   -- expanded view
   local open = DB.expanded
   more:SetShown(open)
-  ui:SetHeight(COMPACT_H + (open and 102 or 0))
+  ui:SetHeight(COMPACT_H + (open and 124 or 0))
   expandBtn:SetNormalTexture(open and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
   manualBtn:SetOn(not app)
   appBtn:SetOn(app)
@@ -658,6 +793,8 @@ refresh = function()
   for _, w in ipairs(speedWidgets) do w:SetShown(app) end
   for key, fs in pairs(speedRows) do fs:SetText(fmtSpeed(DB[key])) end
   for _, cb in ipairs({ warnBox, hardBox }) do cb:SetShown(not app); cb.text:SetShown(not app) end
+  loreBox:SetChecked(DB.lore)
+  loreBox.text:SetText(string.format("Lore messages every %s %s", DB.loreEvery, DB.units == "mi" and "mi" or "km"))
 
   if s then
     startBtn:Disable(); pauseBtn:Enable(); stopBtn:Enable()
@@ -741,7 +878,22 @@ bridge:SetScript("OnUpdate", function(_, dt)
   end
   if s and not s.paused and counting then
     s.time = s.time + stepT
-    s.real = s.real + kmh * stepT / 3600
+    local d = kmh * stepT / 3600
+    s.real = s.real + d
+    if kmh >= (DB.runFrom or 4.5) then s.ran = (s.ran or 0) + d else s.walked = (s.walked or 0) + d end
+    -- lore subtitle every N km (or miles)
+    local every = DB.loreEvery or 0.5
+    local dist = DB.units == "mi" and s.real / MILE_KM or s.real
+    s.nextLore = s.nextLore or every
+    if dist >= s.nextLore then
+      local mark = math.floor(dist / every + 1e-6) * every
+      s.nextLore = mark + every
+      if DB.lore and every > 0 then
+        local major = math.floor(mark + 1e-6) % 5 == 0 and math.abs(mark - math.floor(mark + 0.5)) < 1e-6
+        local kind = major and "milestone" or (kmh >= (DB.runFrom or 4.5) and "run" or "walk")
+        showLore(kind, string.format("%s  ·  %s walked  ·  %s run", fmtDist(s.real), fmtDist(s.walked or 0), fmtDist(s.ran or 0)))
+      end
+    end
     local km = st.speed * stepT * YARD_KM
     s.char = s.char + km
     if onFoot(st) then s.foot = s.foot + km end
@@ -817,7 +969,8 @@ SlashCmdList.WINDRUNNER = function(msg)
     say("last sessions:")
     for i = 1, math.min(10, #DB.sessions) do
       local x = DB.sessions[i]
-      print(string.format("  %s  %s  you %s / character %s", x.date, fmtTime(x.time), fmtDist(x.real), fmtDist(x.char)))
+      print(string.format("  %s  %s  you %s (%s walked, %s run) / character %s", x.date, fmtTime(x.time),
+        fmtDist(x.real), fmtDist(x.walked or 0), fmtDist(x.ran or 0), fmtDist(x.char)))
     end
   elseif msg == "debug" then
     say("treadmill link:")
@@ -837,6 +990,25 @@ SlashCmdList.WINDRUNNER = function(msg)
     DB.hardcore = not DB.hardcore
     say(DB.hardcore and ("|cffff3333Hardcore on|r: " .. hardcoreHelp()) or "Hardcore off.")
     refresh()
+  elseif msg == "lore" then
+    DB.lore = not DB.lore
+    say(DB.lore and "lore messages on." or "lore messages off.")
+    refresh()
+  elseif msg:match("^every") then
+    local n = tonumber(msg:match("^every%s+([%d%.]+)"))
+    if n and n >= 0.1 and n <= 50 then
+      DB.loreEvery = n
+      if DB.session then
+        local dist = DB.units == "mi" and DB.session.real / MILE_KM or DB.session.real
+        DB.session.nextLore = (math.floor(dist / n) + 1) * n
+      end
+      say(string.format("lore messages every %s %s.", n, DB.units == "mi" and "mi" or "km"))
+      refresh()
+    else
+      say("usage: /wr every <distance>, e.g. /wr every 0.5")
+    end
+  elseif msg == "lore test" or msg == "testlore" then
+    showLore("walk", "preview")
   elseif msg == "warn" then
     DB.warn = not DB.warn
     say(DB.warn and "movement warning on." or "movement warning off.")

@@ -11,8 +11,8 @@ Walk on your treadmill while you play.
 
 ## Download
 
-- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261106-1513)
-- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v2.4)
+- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261106-1853)
+- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v2.5)
 
 - **App:** unzip and run `WalkingPad.exe`. Windows SmartScreen may warn because it isn't signed:
   *More info → Run anyway*. Close the KS Fit / Mi Home app first — the pad accepts one connection.
@@ -39,7 +39,10 @@ Walk on your treadmill while you play.
 - **Manual mode** — any treadmill: Start / Pause / Stop and set your belt speed.
 - **App mode** — WalkingPad Control drives the belt from your character; the session starts when you move.
 - **Hardcore** (Manual mode) — movement keys locked unless a session runs. Never in combat.
-- Commands: `/wr`, `/wr history`, `/wr miles`, `/wr warn`, `/wr hardcore`, `/wr sync`, `/wr debug`.
+- **Lore messages** (on by default) — every 0.5 km a line in the spirit of Azeroth appears like a subtitle
+  at the bottom of the screen, with your distance. Walking and running distance are tracked separately.
+  `/wr lore` toggles them, `/wr every 1` changes the interval, `/wr testlore` previews one.
+- Commands: `/wr`, `/wr history`, `/wr miles`, `/wr warn`, `/wr hardcore`, `/wr lore`, `/wr every <km>`, `/wr testlore`, `/wr sync`, `/wr debug`.
 - Works on Retail, Forever and Classic clients.
 
 ## How the link works
