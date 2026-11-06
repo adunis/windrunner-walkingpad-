@@ -11,8 +11,8 @@ Walk on your treadmill while you play.
 
 ## Download
 
-Grab the latest **WalkingPad.zip** (the app) and **Windrunner.zip** (the addon) from
-[Releases](../../releases).
+- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261106-1513)
+- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v2.4)
 
 - **App:** unzip and run `WalkingPad.exe`. Windows SmartScreen may warn because it isn't signed:
   *More info → Run anyway*. Close the KS Fit / Mi Home app first — the pad accepts one connection.
