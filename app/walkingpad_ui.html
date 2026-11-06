@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WalkingPad Control</title>
+<style>
+  :root {
+    --bg: #f3f1ec; --panel: #ffffff; --sunk: #ebe8e1; --ink: #1c1b19; --muted: #7a766e; --line: #e2ded5;
+    --accent: #e8590c; --accent-ink: #fff; --ok: #2f9e44; --warn: #c92a2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121211; --panel: #1c1b19; --sunk: #141413; --ink: #f0eee8; --muted: #8f8b82; --line: #2c2a27; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 13px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif; }
+  main { max-width: 520px; margin: 0 auto; padding: 12px 12px 20px; }
+  header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  header h1 { font-size: 14px; font-weight: 650; margin: 0; letter-spacing: .01em; }
+  header .build { color: var(--muted); font-size: 11px; }
+  .pill { margin-left: auto; font-size: 11px; padding: 3px 9px; border-radius: 99px; background: var(--sunk);
+    color: var(--muted); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .7; }
+  .pill.connected { color: var(--ok); }
+  .pill.scanning, .pill.connecting { color: #d9a400; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+  .hero { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; align-items: center; }
+  .speedbox { line-height: 1; }
+  .speedbox .big { font-size: 46px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .speedbox .unit { color: var(--muted); font-size: 12px; margin-left: 2px; }
+  .speedbox .belt { color: var(--muted); font-size: 11px; margin-top: 6px; text-transform: capitalize; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .stats div { background: var(--sunk); border-radius: 8px; padding: 6px 8px; }
+  .stats b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; font-weight: 650; }
+  .stats span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .controls { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 12px; align-items: center; }
+  .stepper { display: flex; align-items: center; gap: 6px; }
+  .stepper .target { font-variant-numeric: tabular-nums; font-weight: 650; width: 36px; text-align: right; }
+  .actions { display: flex; gap: 6px; }
+
+  button { font: inherit; color: var(--ink); background: var(--sunk); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+  button:hover { border-color: var(--muted); }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.go { background: var(--ok); border-color: transparent; color: #fff; font-weight: 600; min-width: 92px; }
+  button.stop { background: var(--warn); border-color: transparent; color: #fff; font-weight: 600; min-width: 72px; }
+  button.step { width: 28px; padding: 4px 0; font-size: 15px; line-height: 1; }
+  input[type=range] { flex: 1; min-width: 60px; accent-color: var(--accent); }
+  .seg { display: flex; background: var(--sunk); border: 1px solid var(--line); border-radius: 9px; padding: 2px; gap: 2px; }
+  .seg button { flex: 1; border: 0; background: transparent; padding: 5px 6px; border-radius: 7px; font-size: 12px; }
+  .seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .modes { margin-top: 10px; }
+
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 4px 2px 10px; }
+  .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0;
+    padding: 6px 10px; color: var(--muted); font-weight: 600; }
+  .tabs button.on { color: var(--ink); border-bottom-color: var(--accent); }
+  .tab { display: none; } .tab.on { display: block; }
+
+  .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin: 0 0 6px; font-weight: 600; }
+  .hint, small { display: block; color: var(--muted); font-size: 11px; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; margin-top: 10px; }
+  .grid label, .field { font-size: 11px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+  input, select { font: inherit; font-size: 12px; padding: 5px 8px; border-radius: 7px; border: 1px solid var(--line);
+    background: var(--sunk); color: var(--ink); min-width: 0; }
+  .toggle { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; }
+  .switch { position: relative; width: 36px; height: 20px; flex: 0 0 36px; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch i { position: absolute; inset: 0; background: var(--line); border-radius: 99px; transition: .15s; }
+  .switch i::after { content: ""; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: .15s; }
+  .switch input:checked + i { background: var(--accent); }
+  .switch input:checked + i::after { transform: translateX(16px); }
+  .switch input:disabled + i { opacity: .4; }
+  .gamebar { margin-top: 8px; padding: 7px 9px; border-radius: 8px; background: var(--sunk); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .gamebar b { color: var(--accent); }
+  details summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-top: 10px; }
+  pre { margin: 0; font: 11px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace; color: var(--muted);
+    max-height: 300px; overflow: auto; white-space: pre-wrap; }
+  .lab input[type=text] { flex: 1; font-family: ui-monospace, Consolas, monospace; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+  @media (max-width: 420px) {
+    .hero { grid-template-columns: 1fr; } .grid { grid-template-columns: 1fr; }
+    .controls { grid-template-columns: 1fr; } .actions button { flex: 1; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>WalkingPad</h1><span class="build" id="build"></span>
+    <span id="conn" class="pill">disconnected</span>
+  </header>
+
+  <section class="panel">
+    <div class="hero">
+      <div class="speedbox">
+        <span class="big" id="speed">0.0</span><span class="unit">km/h</span>
+        <div class="belt" id="belt">—</div>
+      </div>
+      <div class="stats">
+        <div><b id="time">0:00</b><span>Time</span></div>
+        <div><b id="dist">0.00</b><span>km</span></div>
+        <div><b id="steps">0</b><span>Steps</span></div>
+      </div>
+    </div>
+    <div class="controls">
+      <div class="stepper">
+        <button class="step" id="minus" title="Slower (↓)">−</button>
+        <input type="range" id="slider" min="0.5" max="6" step="0.1" value="2.0" aria-label="Target speed">
+        <button class="step" id="plus" title="Faster (↑)">+</button>
+        <span class="target" id="target">2.0</span>
+      </div>
+      <div class="actions">
+        <button class="go" id="start">Start</button>
+        <button class="stop" id="stop" title="Space">Stop</button>
+      </div>
+    </div>
+    <div class="seg modes" id="modes">
+      <button data-mode="manual">Manual</button>
+      <button data-mode="auto">Auto</button>
+      <button data-mode="standby">Standby</button>
+    </div>
+  </section>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="gaming">Gaming</button>
+    <button data-tab="pad">Pad</button>
+    <button data-tab="lab">Lab</button>
+    <button data-tab="log">Log</button>
+  </nav>
+
+  <section class="tab panel" data-tab="gaming">
+    <div class="seg" id="dir">
+      <button data-d="follow">Belt follows game</button>
+      <button data-d="drive">Pad drives game</button>
+      <button data-d="none">Treadmill only</button>
+    </div>
+    <div class="hint" id="dirHint" style="margin-top:6px"></div>
+    <div class="gamebar" id="gameBar">—</div>
+    <button id="adminBtn" style="display:none;margin-top:8px">Restart WalkingPad as administrator</button>
+
+    <div class="grid">
+      <label>Game
+        <select id="preset">
+          <option value="generic">Any game (W / Shift / pad)</option>
+          <option value="eso">Elder Scrolls Online</option>
+          <option value="wow">World of Warcraft (Windrunner)</option>
+        </select></label>
+      <div class="field" id="wowInstallWrap" style="justify-content:flex-end">
+        <span class="row"><button id="wowInstall" style="flex:1">Install Windrunner</button>
+        <button id="wowCheck" title="With WoW open: reports what the app sees">Check link</button></span>
+      </div>
+    </div>
+    <div class="grid" id="mainSpeeds"></div>
+
+    <details><summary>Advanced</summary>
+    <div class="grid">
+      <label>Input (belt follows game)
+        <select data-k="source"><option value="both">Keyboard + gamepad</option>
+          <option value="keyboard">Keyboard</option><option value="gamepad">Gamepad</option>
+          <option value="wow">WoW addon</option></select></label>
+      <label>When you stop moving
+        <select data-k="idle"><option value="slow">Crawl, stop later</option>
+          <option value="stop">Stop right away</option></select></label>
+      <label>Forward key <input data-k="fwd_key" maxlength="5"></label>
+      <label>Sprint key
+        <select data-k="sprint_key"><option value="shift">Shift</option><option value="ctrl">Ctrl</option>
+          <option value="alt">Alt</option><option value="none">None</option></select></label>
+      <label>Walk speed (km/h) <input data-k="walk_speed" type="number" step="0.1" min="0.5" max="6"></label>
+      <label>Sprint speed (km/h) <input data-k="sprint_speed" type="number" step="0.1" min="0.5" max="6"></label>
+      <label>Stick min speed <input data-k="pad_min" type="number" step="0.1" min="0.5" max="6"></label>
+      <label>Stick max speed <input data-k="pad_max" type="number" step="0.1" min="0.5" max="6"></label>
+      <label>WoW walking (km/h) <input data-k="wow_walk" type="number" step="0.1" min="0" max="6"></label>
+      <label>WoW running (km/h) <input data-k="wow_run" type="number" step="0.1" min="0" max="6"></label>
+      <label>WoW mounted (0 = rest) <input data-k="wow_mount" type="number" step="0.1" min="0" max="6"></label>
+      <label>Crawl speed <input data-k="idle_speed" type="number" step="0.1" min="0.5" max="6"></label>
+      <label>Stop after idle (s, 0 = never) <input data-k="idle_timeout" type="number" step="1" min="0"></label>
+      <label>Pad → game: move from <input data-k="rev_move" type="number" step="0.1" min="0.1" max="6"></label>
+      <label>Pad → game: sprint from <input data-k="rev_sprint" type="number" step="0.1" min="0.5" max="6"></label>
+      <label>Pad → WoW: walk below (0 = run) <input data-k="rev_walk_below" type="number" step="0.1" min="0" max="6"></label>
+      <label style="grid-column:1/-1">Game window title (only react to / send keys to it) <input data-k="rev_window" placeholder="any window"></label>
+    </div>
+    </details>
+  </section>
+
+  <section class="tab panel" data-tab="pad">
+    <div class="row" style="justify-content:space-between">
+      <div class="label" style="margin:0">Auto-mode sensitivity</div>
+      <button id="readPrefs" title="Ask the pad for its current settings">Read from pad</button>
+    </div>
+    <div class="seg" id="sens" style="margin-top:6px">
+      <button data-v="1">High</button><button data-v="2">Medium</button><button data-v="3">Low</button>
+    </div>
+    <div class="hint" style="margin-top:4px">How quickly the belt speeds up / slows down as you move forward or back.</div>
+    <div class="grid">
+      <label>Max speed (km/h) <input id="prefMax" type="number" step="0.5" min="0.5" max="6"></label>
+      <label>Start speed (km/h) <input id="prefStart" type="number" step="0.5" min="0.5" max="6"></label>
+    </div>
+    <hr>
+    <div class="toggle">
+      <div>Smart start<small>Auto mode: the belt starts when you step on</small></div>
+      <label class="switch"><input type="checkbox" id="prefSmart"><i></i></label>
+    </div>
+    <div class="toggle">
+      <div>Mute beeps<small id="soundNote">Connect to check support</small></div>
+      <label class="switch"><input type="checkbox" id="mute" disabled><i></i></label>
+    </div>
+    <div class="hint" id="prefsNote">Current values appear after the first change, or press "Read from pad".</div>
+  </section>
+
+  <section class="tab panel lab" data-tab="lab">
+    <div class="toggle">
+      <div>Log raw messages<small>Every byte the pad sends, on every channel</small></div>
+      <label class="switch"><input type="checkbox" id="rawOn"><i></i></label>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <input type="text" id="rawHex" placeholder="f7 a2 00 00 00 fd">
+      <input type="text" id="rawChar" value="fe02" style="flex:0 0 70px" title="characteristic (fe02 or full UUID)">
+      <button id="rawSend">Send</button>
+    </div>
+    <label class="hint" style="margin-top:6px"><input type="checkbox" id="rawCrc" checked> auto-fix checksum (fe02)</label>
+    <details><summary>Bluetooth channels on this pad</summary><pre id="gatt">Connect first</pre></details>
+  </section>
+
+  <section class="tab panel" data-tab="log">
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let ws, state = {}, sendTimer, editing = false;
+
+  function connect() {
+    ws = new WebSocket(`ws://${location.host}/ws`);
+    ws.onmessage = e => render(JSON.parse(e.data));
+    ws.onclose = () => { $("conn").textContent = "app offline"; $("conn").className = "pill"; setTimeout(connect, 2000); };
+  }
+  const send = obj => ws && ws.readyState === 1 && ws.send(JSON.stringify(obj));
+
+  function fmtTime(s) {
+    const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = String(s % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+  }
+
+  function render(s) {
+    state = s;
+    $("build").textContent = s.build ? "build " + s.build : "";
+    $("conn").textContent = s.connection + (s.name ? ` · ${s.name}` : "");
+    $("conn").className = "pill " + s.connection;
+    $("speed").textContent = s.speed.toFixed(1);
+    $("belt").textContent = s.belt + (s.mode ? ` · ${s.mode} mode` : "");
+    $("time").textContent = fmtTime(s.time);
+    $("dist").textContent = s.distance.toFixed(2);
+    $("steps").textContent = s.steps;
+    document.querySelectorAll("#modes button").forEach(b => b.classList.toggle("on", b.dataset.mode === s.mode));
+    $("mute").disabled = !s.sound_control;
+    $("soundNote").textContent = s.connection !== "connected" ? "Connect to check support"
+      : s.sound_control ? "Experimental — may not work on every firmware" : "Not exposed by this pad — see Lab";
+    $("log").textContent = s.log.join("\n");
+    $("log").scrollTop = 1e9;
+    $("rawOn").checked = !!s.raw_log;
+    const p = s.prefs;
+    document.querySelectorAll("#sens button").forEach(b => b.classList.toggle("on", !!p && +b.dataset.v === p.sensitivity));
+    if (p) {
+      if (document.activeElement !== $("prefMax")) $("prefMax").value = p.max_speed;
+      if (document.activeElement !== $("prefStart")) $("prefStart").value = p.start_speed;
+      $("prefSmart").checked = p.smart_start;
+      $("prefsNote").textContent = "Values reported by the pad.";
+    }
+
+    const g = s.game || {};
+    document.querySelectorAll("#dir button").forEach(b => {
+      b.classList.toggle("on", b.dataset.d === g.direction);
+      b.disabled = g.available === false && b.dataset.d !== "none";   // treadmill-only needs no gaming
+    });
+    $("dirHint").textContent = g.direction === "drive"
+      ? "Walk forward on the pad (Auto mode) → your character walks."
+      : g.direction === "none" ? "Only the app and the pad's remote control the belt. Games are ignored."
+      : "Your character moves → the belt moves.";
+    const preset = presetOf(g);
+    if (!editing) $("preset").value = preset;
+    $("wowInstallWrap").style.visibility = preset === "wow" ? "visible" : "hidden";
+    renderMainSpeeds(preset, g);
+    $("gameBar").innerHTML = g.direction === "none" ? "Treadmill only: W, gamepad and Windrunner don't control the belt"
+      : g.available === false ? "Gaming needs Windows"
+      : g.reverse ? `Pad drives the game: <b>${g.rev_input}</b>`
+      : g.link ? `<b>Windrunner (WoW) in control:</b> ${g.link_desc} · belt ${(s.speed || 0).toFixed(1)} km/h`
+      : `Belt follows: <b>${g.input}</b> · belt ${(s.speed || 0).toFixed(1)} km/h`;
+    $("adminBtn").style.display = g.admin_problem ? "block" : "none";
+    $("start").textContent = g.reverse ? "Start (Auto)" : "Start";
+    if (!editing) document.querySelectorAll("[data-k]").forEach(el => {
+      if (g[el.dataset.k] !== undefined) el.value = g[el.dataset.k];
+    });
+
+    if (s.gatt && s.gatt.length) $("gatt").textContent = s.gatt.map(c =>
+      `${c.uuid}  [${c.props.join(",")}]` + (c.value ? `\n   = ${c.value}` : "")).join("\n");
+  }
+
+  function setTarget(v, push) {
+    v = Math.min(6, Math.max(0.5, Math.round(v * 10) / 10));
+    $("slider").value = v; $("target").textContent = v.toFixed(1);
+    if (push && state.belt === "running") {
+      clearTimeout(sendTimer);
+      sendTimer = setTimeout(() => send({ action: "speed", speed: v }), 350);
+    }
+  }
+
+  $("slider").oninput = e => setTarget(+e.target.value, true);
+  $("minus").onclick = () => setTarget(+$("slider").value - 0.1, true);
+  $("plus").onclick = () => setTarget(+$("slider").value + 0.1, true);
+  $("start").onclick = () => send({ action: "start", speed: +$("slider").value });
+  $("stop").onclick = () => send({ action: "stop" });
+  document.querySelectorAll("#modes button").forEach(b => b.onclick = () => send({ action: "mode", mode: b.dataset.mode }));
+  $("mute").onchange = e => send({ action: "sound", on: !e.target.checked });
+
+  document.querySelectorAll("#dir button").forEach(b => b.onclick = () => send({ action: "game", settings: { direction: b.dataset.d } }));
+  $("wowInstall").onclick = () => send({ action: "install_wow" });
+  $("wowCheck").onclick = () => send({ action: "wow_check" });
+  $("adminBtn").onclick = () => send({ action: "restart_admin" });
+
+  const PRESETS = {
+    generic: { source: "both", fwd_key: "W", sprint_key: "shift", rev_window: "" },
+    eso: { source: "both", fwd_key: "W", sprint_key: "shift", rev_window: "Elder Scrolls" },
+    wow: { source: "wow", fwd_key: "W", sprint_key: "none", rev_window: "World of Warcraft" },
+  };
+  function presetOf(g) {
+    if (g.source === "wow") return "wow";
+    if ((g.rev_window || "").toLowerCase().includes("elder scrolls")) return "eso";
+    return "generic";
+  }
+  $("preset").onchange = e => send({ action: "game", settings: PRESETS[e.target.value] });
+
+  // The few speeds that matter for the chosen game, shown outside "Advanced"
+  let shownFor = "";
+  function renderMainSpeeds(preset, g) {
+    const fields = preset === "wow"
+      ? [["rev_walk_below", "Pad → WoW: walk below (km/h)"], ["rev_move", "Pad → game: move from"]]
+      : [["walk_speed", "Walk (km/h)"], ["sprint_speed", "Sprint (km/h)"], ["rev_move", "Pad → game: move from"], ["rev_sprint", "Pad → game: sprint from"]];
+    if (shownFor !== preset) {
+      shownFor = preset;
+      $("mainSpeeds").innerHTML = fields.map(([k, l]) =>
+        `<label>${l} <input data-main="${k}" type="number" step="0.1" min="0" max="6"></label>`).join("");
+      $("mainSpeeds").querySelectorAll("input").forEach(el => {
+        el.onfocus = () => editing = true;
+        el.onblur = () => editing = false;
+        el.onchange = () => send({ action: "game", settings: { [el.dataset.main]: +el.value } });
+      });
+    }
+    if (!editing) $("mainSpeeds").querySelectorAll("input").forEach(el => el.value = g[el.dataset.main]);
+  }
+
+  document.querySelectorAll("[data-k]").forEach(el => {
+    el.onfocus = () => editing = true;
+    el.onblur = () => editing = false;
+    el.onchange = () => send({ action: "game", settings: { [el.dataset.k]: el.type === "number" ? +el.value : el.value } });
+  });
+
+  document.querySelectorAll("#sens button").forEach(b => b.onclick = () => send({ action: "pref", name: "sensitivity", value: +b.dataset.v }));
+  $("prefMax").onchange = e => send({ action: "pref", name: "max_speed", value: +e.target.value });
+  $("prefStart").onchange = e => send({ action: "pref", name: "start_speed", value: +e.target.value });
+  $("prefSmart").onchange = e => send({ action: "pref", name: "smart_start", value: e.target.checked });
+  $("readPrefs").onclick = () => send({ action: "read_prefs" });
+
+  $("rawOn").onchange = e => send({ action: "raw_log", on: e.target.checked });
+  $("rawSend").onclick = () => send({ action: "raw", hex: $("rawHex").value, char: $("rawChar").value.trim(), crc: $("rawCrc").checked });
+  $("rawHex").onkeydown = e => { if (e.key === "Enter") $("rawSend").click(); };
+
+  document.addEventListener("keydown", e => {
+    if (["INPUT", "SELECT"].includes(e.target.tagName)) return;
+    if (e.code === "Space") { e.preventDefault(); send({ action: "stop" }); }
+    if (e.code === "ArrowUp") setTarget(+$("slider").value + 0.1, true);
+    if (e.code === "ArrowDown") setTarget(+$("slider").value - 0.1, true);
+  });
+
+  // tabs (remembered per viewer)
+  function showTab(name) {
+    document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+    document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.tab === name));
+    try { localStorage.setItem("wp_tab", name); } catch (e) {}
+  }
+  document.querySelectorAll("#tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+  let firstTab = "gaming";
+  try { firstTab = localStorage.getItem("wp_tab") || "gaming"; } catch (e) {}
+  showTab(firstTab);
+
+  setTarget(2.0, false);
+  connect();
+</script>
+</body>
+</html>
