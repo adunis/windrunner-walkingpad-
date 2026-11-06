@@ -214,7 +214,8 @@ local function updateSquares(st)
 end
 
 ---------------------------------------------------------------------------------
--- Lore subtitles: original lines in the spirit of Azeroth, shown every N km
+-- Lore subtitles: original lines in the spirit of Azeroth, shown every N km.
+-- Class / race / faction lines live in Lore.lua; these are the general ones.
 ---------------------------------------------------------------------------------
 local LORE = {
   walk = {
@@ -302,23 +303,49 @@ sub:SetScript("OnUpdate", function(self, dt)
   self:SetAlpha(a)
 end)
 
-local recentLore = {}
-local function pickLore(kind)
-  local pool = LORE[kind]
-  local choices = {}
-  for i, q in ipairs(pool) do
-    if not recentLore[kind .. i] then choices[#choices + 1] = i end
-  end
-  if #choices == 0 then                      -- all used: new cycle, but never the line just shown
-    for i in ipairs(pool) do
-      recentLore[kind .. i] = nil
-      if i ~= recentLore[kind .. "last"] then choices[#choices + 1] = i end
+-- Your character's own lines: their class + their race (walk / run); milestones by faction.
+-- Falls back to the general lines above for anything not covered (e.g. a new race).
+local function lorePool(kind)
+  local WL = WindrunnerLore or {}
+  local okc, _, cls = pcall(UnitClass, "player")
+  local okr, _, race = pcall(UnitRace, "player")
+  local okf, faction = pcall(UnitFactionGroup, "player")
+  local pool, from = {}, {}
+  local function add(list, label)
+    if list and #list > 0 then
+      for _, q in ipairs(list) do pool[#pool + 1] = q end
+      from[#from + 1] = label
     end
   end
-  local i = choices[math.random(#choices)]
-  recentLore[kind .. i] = true
-  recentLore[kind .. "last"] = i
-  return pool[i]
+  if kind == "milestone" then
+    add(okf and WL.faction and WL.faction[faction], faction)
+    add(LORE.milestone, "milestones")
+  else
+    add(okc and cls and WL.class and WL.class[cls] and WL.class[cls][kind], cls)
+    add(okr and race and WL.race and WL.race[race] and WL.race[race][kind], race)
+    if #pool == 0 then add(LORE[kind], "general") end
+  end
+  return pool, table.concat(from, " + ")
+end
+Windrunner_LorePool = lorePool    -- for testing
+
+local recentLore = {}
+local function pickLore(kind)
+  local pool = lorePool(kind)
+  local choices = {}
+  for _, q in ipairs(pool) do
+    if not recentLore[q[1]] then choices[#choices + 1] = q end
+  end
+  if #choices == 0 then                      -- all used: new cycle, but never the line just shown
+    for _, q in ipairs(pool) do
+      recentLore[q[1]] = nil
+      if q[1] ~= recentLore["__last" .. kind] then choices[#choices + 1] = q end
+    end
+  end
+  local q = choices[math.random(#choices)]
+  recentLore[q[1]] = true
+  recentLore["__last" .. kind] = q[1]
+  return q
 end
 
 local function showLore(kind, statLine)
@@ -1008,6 +1035,9 @@ SlashCmdList.WINDRUNNER = function(msg)
       say("usage: /wr every <distance>, e.g. /wr every 0.5")
     end
   elseif msg == "lore test" or msg == "testlore" then
+    local wpool, wfrom = lorePool("walk")
+    local rpool = lorePool("run")
+    say(string.format("your lines: %s (%d walking, %d running).", wfrom, #wpool, #rpool))
     showLore("walk", "preview")
   elseif msg == "warn" then
     DB.warn = not DB.warn
