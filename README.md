@@ -9,6 +9,8 @@ Walk on your treadmill while you play.
 
 ![Windrunner figure: standing, walking, running](docs/windrunner_anim.gif)
 
+Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
+
 ## Download
 
 - **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261106-1949)
