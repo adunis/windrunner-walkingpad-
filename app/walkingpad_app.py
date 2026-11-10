@@ -27,7 +27,7 @@ from aiohttp import web, WSMsgType
 from bleak import BleakClient, BleakScanner
 
 PORT = 8765
-BUILD = "dev"   # replaced by the build script
+BUILD = "20261110-pixel-fix"   # replaced by the build script
 SETTINGS_FILE = Path.home() / ".walkingpad_settings.json"
 LOG_FILE = Path.home() / "walkingpad_log.txt"
 
@@ -210,7 +210,10 @@ REQ_CHECK = 0x5A
 
 def find_marker(buf: bytes, w: int, h: int):
     """Find Windrunner's squares in a BGRA screenshot.
-    Returns (marker_xy, data_xy, request_xy or None) or None."""
+    Require all three squares; return their centres, or None.
+    Measure the marker rather than assuming a particular UI/DPI scale."""
+    if w <= 0 or h <= 0 or len(buf) != w * h * 4:
+        return None
     def px(x, y):
         j = (y * w + x) * 4
         return buf[j + 2], buf[j + 1], buf[j]          # r, g, b
@@ -219,19 +222,19 @@ def find_marker(buf: bytes, w: int, h: int):
         if i % 4 == 0:
             p = i // 4
             mx, my = p % w, p // w
-            cy = my + 1 if my + 1 < h else my             # sample a row inside the squares
-            for dx in (3, 2, 4, 1, 5, 6):                 # data square sits right of the marker
-                if mx + dx < w:
-                    r, g, b = px(mx + dx, cy)
-                    if r == DATA_CHECK and b & 0x80:
-                        req = None
-                        for rx in (2 * dx, 2 * dx - 1, 2 * dx + 1):
-                            if mx + rx < w:
-                                r2, g2, b2 = px(mx + rx, cy)
-                                if r2 == REQ_CHECK and b2 & 0x80:
-                                    req = (mx + rx, cy)
-                                    break
-                        return (mx, cy), (mx + dx, cy), req
+            marker = (0x12, 0x34, 0x56)
+            if mx > 0 and px(mx - 1, my) == marker:
+                i = buf.find(MARK_BGR, i + 1)
+                continue
+            size = 1
+            while mx + size < w and size <= 32 and px(mx + size, my) == marker:
+                size += 1
+            if size <= 32 and mx + 3 * size <= w and my + size <= h:
+                cx, cy = mx + size // 2, my + size // 2
+                if (px(cx, cy) == marker
+                        and decode_data(*px(cx + size, cy)) is not None
+                        and decode_request(*px(cx + 2 * size, cy)) is not None):
+                    return (cx, cy), (cx + size, cy), (cx + 2 * size, cy)
         i = buf.find(MARK_BGR, i + 1)
     return None
 
@@ -244,10 +247,13 @@ def decode_data(r, g, b):
 
 
 def decode_request(r, g, b):
-    """Windrunner's 3rd square: B bit0 = App mode, bit1 = belt should run; G = wanted km/h x10."""
-    if r != REQ_CHECK or not b & 0x80:
-        return {"app_mode": False, "target": 0.0, "run": False}
-    return {"app_mode": bool(b & 1), "target": g / 10, "run": bool(b & 2)}
+    """Request bits: App mode, run, session active, combat; G = km/h x10.
+    Accept original 0x83 run frames as well as the extended session protocol.
+    """
+    if r != REQ_CHECK or b not in (0x80, 0x81, 0x83, 0x85, 0x87, 0x89, 0x8D, 0x8F) or not 0 <= g <= 60:
+        return None
+    return {"app_mode": bool(b & 1), "target": g / 10, "run": bool(b & 2) and g > 0,
+            "session_active": bool(b & 4), "in_combat": bool(b & 8)}
 
 
 def monitor_rects():
@@ -279,18 +285,25 @@ class WowBridge:
         self.last = None
         self.status = "looking for the WoW addon…"
 
-    def _capture(self):
-        x, y = _u32.GetSystemMetrics(76), _u32.GetSystemMetrics(77)
-        w, h = _u32.GetSystemMetrics(78), _u32.GetSystemMetrics(79)
+    def _capture(self, rect=None):
+        if rect is None:
+            x, y = _u32.GetSystemMetrics(76), _u32.GetSystemMetrics(77)
+            w, h = _u32.GetSystemMetrics(78), _u32.GetSystemMetrics(79)
+        else:
+            x, y, w, h = rect
         hdc = _u32.GetDC(None)
         mdc = _gdi.CreateCompatibleDC(hdc)
         bmp = _gdi.CreateCompatibleBitmap(hdc, w, h)
         old = _gdi.SelectObject(mdc, bmp)
         try:
-            _gdi.BitBlt(mdc, 0, 0, w, h, hdc, x, y, 0x00CC0020)
+            if not _gdi.BitBlt(mdc, 0, 0, w, h, hdc, x, y, 0x00CC0020):
+                raise OSError("Screen capture failed")
+            # GetDIBits requires the bitmap to be deselected from its DC.
+            _gdi.SelectObject(mdc, old)
             bmi = _BMIH(ctypes.sizeof(_BMIH), w, -h, 1, 32, 0, 0, 0, 0, 0, 0)
             buf = ctypes.create_string_buffer(w * h * 4)
-            _gdi.GetDIBits(mdc, bmp, 0, h, buf, ctypes.byref(bmi), 0)
+            if _gdi.GetDIBits(mdc, bmp, 0, h, buf, ctypes.byref(bmi), 0) != h:
+                raise OSError("Screen capture returned incomplete pixels")
             return x, y, w, h, buf.raw
         finally:
             _gdi.SelectObject(mdc, old)
@@ -318,22 +331,26 @@ class WowBridge:
                         cols.append(f"{buf[j + 2]:02x}{buf[j + 1]:02x}{buf[j]:02x}")
                 self.log(f"  monitor {i} {r - l}x{b - t} at ({l},{t}) top-left pixels: {' '.join(cols)}")
             if not found:
-                self.log("  Expected to start with 123456 123456 123456 a5…… — if the colours are close but not "
+                self.log("  Expected three solid blocks: 123456, a5……, 5a…… (6 pixels each in v2.7) — if the colours are close but not "
                          "exact, turn off HDR / reset WoW gamma; if they're your desktop, WoW isn't fullscreen on that monitor.")
         except Exception as e:
             self.log(f"Link check failed: {e}")
 
-    def _pixel(self, hdc, x, y):
-        c = _gdi.GetPixel(hdc, x, y)
-        return c & 0xFF, (c >> 8) & 0xFF, (c >> 16) & 0xFF      # r, g, b
-
     def read(self):
+        try:
+            return self._read()
+        except OSError as e:
+            self.pos, self.last = None, None
+            self.status = str(e)
+            return None
+
+    def _read(self):
         if not IS_WINDOWS:
             self.status = "needs Windows"
             return None
         now = time.time()
         if self.pos is None:
-            if now - self.last_search < 3:
+            if now - self.last_search < 0.5:
                 return None
             self.last_search = now
             x, y, w, h, buf = self._capture()
@@ -348,21 +365,24 @@ class WowBridge:
                         (x + req[0], y + req[1]) if req else None)
             self.misses = 0
         (mx, my), (dx, dy), rq = self.pos
-        hdc = _u32.GetDC(None)
-        try:
-            m = self._pixel(hdc, mx, my)
-            d = decode_data(*self._pixel(hdc, dx, dy))
-            if d is not None:
-                d.update(decode_request(*self._pixel(hdc, *rq)) if rq else decode_request(0, 0, 0))
-        finally:
-            _u32.ReleaseDC(None, hdc)
-        if m != (0x12, 0x34, 0x56) or d is None:
+        # One capture for all three values avoids mixing separate rendered frames.
+        _, _, _, _, pixels = self._capture((mx, my, rq[0] - mx + 1, 1))
+        def sample(x):
+            j = (x - mx) * 4
+            return pixels[j + 2], pixels[j + 1], pixels[j]
+        m = sample(mx)
+        d = decode_data(*sample(dx))
+        request = decode_request(*sample(rq[0]))
+        if m != (0x12, 0x34, 0x56) or d is None or request is None:
             self.misses += 1
             if self.misses >= 4:          # ~0.2 s of misses: WoW minimised / covered / closed
                 self.pos, self.last = None, None
                 self.status = "lost the addon (WoW minimised or covered?)"
-            return self.last
+            # Never reinterpret a damaged request as a switch to Manual mode.
+            self.last = None
+            return None
         self.misses = 0
+        d.update(request)
         self.last = d
         self.status = "ok"
         return d
@@ -1104,7 +1124,7 @@ class GameMode:
             self.idle_since = None
             if not pad.belt_on:
                 pad.start(want, quiet=True)
-            elif abs(want - pad.target_speed) >= 0.1:
+            elif round(abs(want - pad.target_speed), 1) >= 0.1:
                 pad.set_speed(want, quiet=True)
         elif pad.belt_on:
             if self.idle_since is None:
@@ -1146,7 +1166,7 @@ class GameMode:
             if not pad.belt_on:
                 pad.log(f"Windrunner: belt on, {target:.1f} km/h")
                 pad.start(target, quiet=True)
-            elif abs(target - pad.target_speed) >= 0.1:
+            elif round(abs(target - pad.target_speed), 1) >= 0.1:
                 pad.set_speed(target, quiet=True)
             what = "idle" if not r["moving"] else ("mounted" if r["mounted"] or r["taxi"] or r["vehicle"]
                                                    else "walking" if r["known"] and r["speed"] <= 4.6 else "running")

@@ -13,8 +13,8 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
 
 ## Download
 
-- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261106-1949)
-- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v2.6)
+- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261110-pixel-fix)
+- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v2.7)
 
 - **App:** unzip and run `WalkingPad.exe`. Windows SmartScreen may warn because it isn't signed:
   *More info → Run anyway*. Close the KS Fit / Mi Home app first — the pad accepts one connection.
@@ -71,6 +71,28 @@ or to skip the 3-second start countdown. Built on the work of
 [ph4-walkingpad](https://github.com/ph4r05/ph4-walkingpad).
 
 ## Building
+
+### Pixel-link fix (2026-11-10)
+
+Includes the locally updated expanded UI, clearer session status, and Combat Crawl
+(toggle with `/wr combat`). Checkbox rows are separated in both modes. The app
+accepts the added session/combat flags as well as the original protocol.
+
+Install both the updated Windows app and Windrunner v2.7. The addon draws three
+6×6 physical-pixel blocks, recalculated on display/UI-scale changes. The reader
+measures their size and samples their centres in one capture; it also reads the
+older 3×3 blocks. Missing or corrupted request pixels now mean link loss, rather
+than a switch to Manual mode / keyboard control. Screen-capture failures clear
+stale readings. Speed changes of exactly 0.1 km/h are no longer skipped by
+floating-point rounding.
+
+For diagnosis, use `/wr debug` in WoW and the app's link check. Exact colour bytes
+are required: HDR or altered gamma can still prevent decoding. Test with WoW in
+Windowed (Fullscreen), Windrunner in App mode, sync squares shown, and the app in
+Belt follows the game. Windowed positioning is also discovered automatically.
+
+Regression checks: `python -m unittest discover -s tests -v`.
+Live WoW rendering and physical treadmill operation still require validation.
 
 Windows: run `app\build_exe.bat` (needs Python 3.12). Or run from source:
 `pip install bleak aiohttp pywebview pystray pillow` then `python app\walkingpad_app.py`.

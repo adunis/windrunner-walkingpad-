@@ -9,11 +9,13 @@
 -- Hardcore (Manual mode): you can only move while a session runs.
 --   Never in combat (WoW doesn't allow addons to change keys then).
 -- Warning (Manual mode): "Your character is walking but you are not!"
+-- Combat Crawl (App mode): forces minimum belt speed during combat.
 --
 -- /wr           show or hide the window
 -- /wr history   last sessions in chat
 -- /wr miles     switch km / miles
--- /wr warn      toggle the warning      /wr hardcore  toggle Hardcore
+-- /wr warn      toggle the warning      /wr hardcore   toggle Hardcore
+-- /wr combat    toggle Combat Crawl (App mode only)
 -- /wr sync      show or hide the sync squares (App mode needs them)
 -- /wr lore      toggle lore subtitles   /wr every 0.5  lore every 0.5 km   /wr testlore  preview
 -- /wr debug     treadmill link status
@@ -34,6 +36,7 @@ local DEFAULTS = {
   idle = 1.0, walk = 3.0, run = 5.0, mount = 6.0,  -- App mode belt speeds (km/h)
   expanded = false, runFrom = 4.5,     -- figure runs / distance counts as "run" from this belt speed
   lore = true, loreEvery = 0.5,        -- lore subtitles every this many km (or miles)
+  combatCrawl = true,                  -- force crawl mode in combat
   session = nil, sessions = {},
 }
 local DB
@@ -102,12 +105,12 @@ end
 -- Sync squares (read by WalkingPad Control)
 --   1: #123456 marker
 --   2: R=A5  G=character speed yd/s x10  B=flags
---   3: R=5A  G=wanted belt km/h x10      B=flags (bit0 App mode, bit1 belt should run)
+--   3: R=5A  G=wanted belt km/h x10      B=flags (bit0 App mode, bit1 belt should run, bit2 session active, bit3 in combat)
 ---------------------------------------------------------------------------------
-local BLOCK = 3
+local BLOCK = 6              -- physical pixels; leave room to sample away from edges
 local FLAG_VALID, FLAG_MOVING, FLAG_MOUNTED, FLAG_KNOWN = 0x80, 0x01, 0x02, 0x04
 local FLAG_SWIM, FLAG_TAXI, FLAG_VEHICLE, FLAG_WALKING = 0x08, 0x10, 0x20, 0x40
-local REQ_APPMODE, REQ_RUN = 0x01, 0x02
+local REQ_APPMODE, REQ_RUN, REQ_SESSION_ACTIVE, REQ_IN_COMBAT = 0x01, 0x02, 0x04, 0x08
 local COUNTDOWN = 5          -- seconds the treadmill needs to start (3-2-1 + speed-up)
 
 local bridge = CreateFrame("Frame", "WindrunnerBridgeFrame", UIParent)
@@ -125,7 +128,7 @@ sq[3]:SetColorTexture(0x5A / 255, 0, FLAG_VALID / 255, 1)
 local function layoutBridge()
   local _, ph = GetPhysicalScreenSize()
   if not ph or ph <= 0 then ph = 1080 end
-  local s = BLOCK * 768 / ph
+  local s = BLOCK * 768 / ph / bridge:GetEffectiveScale()
   bridge:ClearAllPoints()
   bridge:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
   bridge:SetSize(s * 3, s)
@@ -140,6 +143,11 @@ end
 
 -- Belt speed for the character's state (App mode)
 local function wantedBelt(st)
+  -- Combat crawl mode: force minimum speed in combat if enabled
+  if DB.combatCrawl and safe(UnitAffectingCombat, "player") then
+    return DB.idle, "combat (crawling)"
+  end
+
   if not st.moving then return DB.idle, "idle" end
   if not onFoot(st) then return DB.mount, st.taxi and "flight path" or "mounted" end
   if st.known and st.speed <= 4.6 then return DB.walk, "walking" end
@@ -205,11 +213,22 @@ local function updateSquares(st)
   sq[2]:SetColorTexture(0xA5 / 255, g / 255, flags / 255, 1)
 
   local req = FLAG_VALID
+  local sessionActive = DB.session ~= nil and not DB.session.paused
+  local inCombat = safe(UnitAffectingCombat, "player") or false
+
   if DB.mode == "app" then
     req = req + REQ_APPMODE
-    if beltWanted() then req = req + REQ_RUN end
+    -- CRITICAL: Belt should ONLY run when session is active AND not paused
+    if sessionActive then
+      req = req + REQ_SESSION_ACTIVE
+      if beltWanted() then req = req + REQ_RUN end
+    end
+    -- Add combat flag for app to know
+    if inCombat then req = req + REQ_IN_COMBAT end
   end
-  local kmh = wantedBelt(st)
+
+  -- Send wanted belt speed (or 0 if session not active)
+  local kmh = sessionActive and wantedBelt(st) or 0
   sq[3]:SetColorTexture(0x5A / 255, math.floor(kmh * 10 + 0.5) / 255, req / 255, 1)
 end
 
@@ -422,10 +441,11 @@ local function flat(parent, text, w, h, onClick)
   return b
 end
 
--- the little runner on a treadmill belt
+-- the little runner on a treadmill belt (compact view only)
 local fig = CreateFrame("Frame", nil, ui)
 fig:SetSize(44, COMPACT_H - 4)
 fig:SetPoint("LEFT", ui, "LEFT", 6, 0)
+fig:SetFrameLevel(ui:GetFrameLevel() + 1)  -- Above ui, but won't overlap expanded content
 local OX, OY = 20, 7            -- hip x, belt height inside the figure box
 
 local function makeLine(alpha, layerLevel)
@@ -553,7 +573,7 @@ lockFs:SetJustifyH("RIGHT")
 local more = CreateFrame("Frame", nil, ui)
 more:SetPoint("TOPLEFT", ui, "TOPLEFT", 0, -COMPACT_H)
 more:SetPoint("TOPRIGHT", ui, "TOPRIGHT", 0, -COMPACT_H)
-more:SetHeight(122)
+more:SetHeight(162)
 local sep = more:CreateTexture(nil, "ARTWORK")
 sep:SetColorTexture(1, 1, 1, 0.08)
 sep:SetPoint("TOPLEFT", 8, 0); sep:SetPoint("TOPRIGHT", -8, 0); sep:SetHeight(1)
@@ -675,14 +695,18 @@ local hardcoreHelp = function()
   return "in Manual mode you can only move while a walking session runs (press Start)."
 end
 
-local warnBox = checkbox("Warn when my character moves without me", -57, "warn")
-local loreBox = checkbox("Lore messages", -100, "lore", function()
-  say(DB.lore and string.format("lore messages on: one every %s %s. Change with /wr every <number>.",
-    DB.loreEvery, DB.units == "mi" and "mi" or "km") or "lore messages off.")
+local warnBox = checkbox("Warn when my character moves without me", -86, "warn")
+local combatBox = checkbox("Combat Crawl: go slow in combat", -105, "combatCrawl", function()
+  say(DB.combatCrawl and "Combat Crawl ON: treadmill will go to minimum speed during combat."
+    or "Combat Crawl off: normal speeds in combat.")
 end)
-local hardBox = checkbox("Hardcore: can't move unless I walk", -76, "hardcore", function()
+local hardBox = checkbox("Hardcore: can't move unless I walk", -105, "hardcore", function()
   say(DB.hardcore and ("|cffff3333Hardcore on|r: " .. hardcoreHelp() .. " In combat you can always move.")
     or "Hardcore off.")
+end)
+local loreBox = checkbox("Lore messages", -124, "lore", function()
+  say(DB.lore and string.format("lore messages on: one every %s %s. Change with /wr every <number>.",
+    DB.loreEvery, DB.units == "mi" and "mi" or "km") or "lore messages off.")
 end)
 
 -- row 3 (App): belt speeds for idle / walking / running / mounted
@@ -811,7 +835,8 @@ refresh = function()
   -- expanded view
   local open = DB.expanded
   more:SetShown(open)
-  ui:SetHeight(COMPACT_H + (open and 124 or 0))
+  fig:SetShown(not open)  -- Hide walking figure when expanded to prevent overlap
+  ui:SetHeight(COMPACT_H + (open and 164 or 0))
   expandBtn:SetNormalTexture(open and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
   manualBtn:SetOn(not app)
   appBtn:SetOn(app)
@@ -820,6 +845,7 @@ refresh = function()
   for _, w in ipairs(speedWidgets) do w:SetShown(app) end
   for key, fs in pairs(speedRows) do fs:SetText(fmtSpeed(DB[key])) end
   for _, cb in ipairs({ warnBox, hardBox }) do cb:SetShown(not app); cb.text:SetShown(not app) end
+  combatBox:SetShown(app); combatBox.text:SetShown(app)  -- Combat Crawl only in App mode
   loreBox:SetChecked(DB.lore)
   loreBox.text:SetText(string.format("Lore messages every %s %s", DB.loreEvery, DB.units == "mi" and "mi" or "km"))
 
@@ -832,8 +858,13 @@ refresh = function()
   end
 
   if app then
+    local inCombat = safe(UnitAffectingCombat, "player") or false
     if s and s.paused then
-      beltFs:SetText("|cffff9933Belt paused|r")
+      beltFs:SetText("|cffff9933Belt paused - App must NOT move belt|r")
+    elseif not s then
+      beltFs:SetText("|cff999999No session - App must NOT move belt|r")
+    elseif inCombat and DB.combatCrawl then
+      beltFs:SetText("|cffff6666Combat: Crawl mode|r")
     elseif beltFresh() then                       -- real speed from the treadmill
       if beltReport.kmh > 0 then
         beltFs:SetText(string.format("|cff66ee66%s|r treadmill", fmtSpeed(beltReport.kmh)))
@@ -855,6 +886,7 @@ refresh = function()
 
   warnBox:SetChecked(DB.warn)
   hardBox:SetChecked(DB.hardcore)
+  combatBox:SetChecked(DB.combatCrawl)
   updateBlock()
 end
 
@@ -1001,6 +1033,9 @@ SlashCmdList.WINDRUNNER = function(msg)
     end
   elseif msg == "debug" then
     say("treadmill link:")
+    local pw, ph = GetPhysicalScreenSize()
+    print(string.format("  display: %dx%d, bridge scale: %.3f, squares: %d physical pixels each",
+      pw, ph, bridge:GetEffectiveScale(), BLOCK))
     print("  mode: " .. DB.mode .. ", sync squares: " .. (DB.bridge and "shown" or "HIDDEN")
       .. ", F11/F12 link keys: " .. (linkBound and "set" or "not set yet"))
     if beltReport.at > 0 then
@@ -1016,6 +1051,11 @@ SlashCmdList.WINDRUNNER = function(msg)
   elseif msg == "hardcore" then
     DB.hardcore = not DB.hardcore
     say(DB.hardcore and ("|cffff3333Hardcore on|r: " .. hardcoreHelp()) or "Hardcore off.")
+    refresh()
+  elseif msg == "combat" or msg == "combatcrawl" then
+    DB.combatCrawl = not DB.combatCrawl
+    say(DB.combatCrawl and "Combat Crawl ON: treadmill will go to minimum speed during combat."
+      or "Combat Crawl off: normal speeds in combat.")
     refresh()
   elseif msg == "lore" then
     DB.lore = not DB.lore
