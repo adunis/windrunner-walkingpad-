@@ -34,7 +34,7 @@ local DEFAULTS = {
   warn = true, hardcore = true,
   speed = 3.0,                                     -- Manual mode belt speed (km/h)
   idle = 1.0, walk = 3.0, run = 5.0, mount = 6.0,  -- App mode belt speeds (km/h)
-  expanded = false, runFrom = 4.5,     -- figure runs / distance counts as "run" from this belt speed
+  expanded = false, options = false, runFrom = 4.5,     -- figure runs / distance counts as "run" from this belt speed
   lore = true, loreEvery = 0.5,        -- lore subtitles every this many km (or miles)
   combatCrawl = true,                  -- force crawl mode in combat
   session = nil, sessions = {},
@@ -385,7 +385,7 @@ Windrunner_ShowLore = showLore     -- for testing / previews
 local ACCENT = { 1.0, 0.55, 0.15 }
 local FONT = (GameFontNormal and GameFontNormal.GetFont and GameFontNormal:GetFont()) or STANDARD_TEXT_FONT
   or "Fonts\\FRIZQT__.TTF"
-local W, COMPACT_H = 250, 54
+local W, COMPACT_H = 290, 54
 
 local ui = CreateFrame("Frame", "WindrunnerFrame", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
 ui:SetSize(W, COMPACT_H)
@@ -637,8 +637,8 @@ local appBtn = flat(more, "App", 40, 18, function()
 end)
 appBtn:SetPoint("LEFT", manualBtn, "RIGHT", 2, 0)
 local beltFs = label(more, 11, "")
-beltFs:SetPoint("LEFT", appBtn, "RIGHT", 8, 0)
-beltFs:SetWidth(W - 8 - 52 - 2 - 40 - 8 - 46)
+beltFs:SetPoint("TOPLEFT", more, "TOPLEFT", 8, -31)
+beltFs:SetWidth(W - 16)
 
 local function step(v, d) return math.max(0.1, math.min(25, math.floor((v + d) * 10 + 0.5) / 10)) end
 local plusBtn = flat(more, "+", 18, 18, function() DB.speed = step(DB.speed, 0.1); refresh() end)
@@ -654,7 +654,7 @@ local startBtn = flat(more, "Start", BW, 20, function()
     or "session started. Set the belt speed with - / + whenever you change it.")
   refresh()
 end)
-startBtn:SetPoint("TOPLEFT", more, "TOPLEFT", 8, -32)
+startBtn:SetPoint("TOPLEFT", more, "TOPLEFT", 8, -50)
 local pauseBtn = flat(more, "Pause", BW, 20, function()
   local s = DB.session
   if not s then return end
@@ -673,7 +673,13 @@ local stopBtn = flat(more, "Stop", BW, 20, function()
 end)
 stopBtn:SetPoint("LEFT", pauseBtn, "RIGHT", 2, 0)
 
--- row 3 (Manual): options
+local settingsBtn = flat(more, "Settings +", W - 16, 18, function()
+  DB.options = not DB.options
+  refresh()
+end)
+settingsBtn:SetPoint("TOPLEFT", more, "TOPLEFT", 8, -77)
+
+-- Less-used options stay behind Settings.
 local function checkbox(text, y, key, onChange)
   local cb = CreateFrame("CheckButton", nil, more, "UICheckButtonTemplate")
   cb:SetSize(20, 20)
@@ -695,12 +701,12 @@ local hardcoreHelp = function()
   return "in Manual mode you can only move while a walking session runs (press Start)."
 end
 
-local warnBox = checkbox("Warn when my character moves without me", -86, "warn")
-local combatBox = checkbox("Combat Crawl: go slow in combat", -105, "combatCrawl", function()
+local warnBox = checkbox("Warn when moving without a session", -104, "warn")
+local combatBox = checkbox("Slow down in combat", -149, "combatCrawl", function()
   say(DB.combatCrawl and "Combat Crawl ON: treadmill will go to minimum speed during combat."
     or "Combat Crawl off: normal speeds in combat.")
 end)
-local hardBox = checkbox("Hardcore: can't move unless I walk", -105, "hardcore", function()
+local hardBox = checkbox("Hardcore: require a walking session", -125, "hardcore", function()
   say(DB.hardcore and ("|cffff3333Hardcore on|r: " .. hardcoreHelp() .. " In combat you can always move.")
     or "Hardcore off.")
 end)
@@ -715,7 +721,7 @@ local ROWS = { { "idle", "Idle" }, { "walk", "Walk" }, { "run", "Run" }, { "moun
 for i, r in ipairs(ROWS) do
   local key, name = r[1], r[2]
   local col, row = (i - 1) % 2, math.floor((i - 1) / 2)
-  local x, y = 8 + col * ((W - 16) / 2 + 2), -60 - row * 20
+  local x, y = 8 + col * ((W - 16) / 2 + 2), -104 - row * 20
   local n = label(more, 10, ""); n:SetPoint("TOPLEFT", more, "TOPLEFT", x, y - 3); n:SetText(name)
   n:SetTextColor(0.7, 0.7, 0.68)
   local v = label(more, 10, ""); v:SetPoint("TOPLEFT", more, "TOPLEFT", x + 34, y - 3)
@@ -836,18 +842,24 @@ refresh = function()
   local open = DB.expanded
   more:SetShown(open)
   fig:SetShown(not open)  -- Hide walking figure when expanded to prevent overlap
-  ui:SetHeight(COMPACT_H + (open and 164 or 0))
+  local extra = DB.options and (app and 202 or 180) or 104
+  more:SetHeight(extra - 2)
+  ui:SetHeight(COMPACT_H + (open and extra or 0))
+  settingsBtn:SetText(DB.options and "Settings -" or "Settings +")
   expandBtn:SetNormalTexture(open and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
   manualBtn:SetOn(not app)
   appBtn:SetOn(app)
   minusBtn:SetShown(not app)
   plusBtn:SetShown(not app)
-  for _, w in ipairs(speedWidgets) do w:SetShown(app) end
+  for _, w in ipairs(speedWidgets) do w:SetShown(app and DB.options) end
   for key, fs in pairs(speedRows) do fs:SetText(fmtSpeed(DB[key])) end
-  for _, cb in ipairs({ warnBox, hardBox }) do cb:SetShown(not app); cb.text:SetShown(not app) end
-  combatBox:SetShown(app); combatBox.text:SetShown(app)  -- Combat Crawl only in App mode
+  for _, cb in ipairs({ warnBox, hardBox }) do cb:SetShown(not app and DB.options); cb.text:SetShown(not app and DB.options) end
+  combatBox:SetShown(app and DB.options); combatBox.text:SetShown(app and DB.options)  -- Combat Crawl only in App mode
+  loreBox:SetShown(DB.options); loreBox.text:SetShown(DB.options)
+  loreBox:ClearAllPoints()
+  loreBox:SetPoint("TOPLEFT", more, "TOPLEFT", 5, app and -170 or -146)
   loreBox:SetChecked(DB.lore)
-  loreBox.text:SetText(string.format("Lore messages every %s %s", DB.loreEvery, DB.units == "mi" and "mi" or "km"))
+  loreBox.text:SetText(string.format("Lore every %s %s", DB.loreEvery, DB.units == "mi" and "mi" or "km"))
 
   if s then
     startBtn:Disable(); pauseBtn:Enable(); stopBtn:Enable()
@@ -860,11 +872,11 @@ refresh = function()
   if app then
     local inCombat = safe(UnitAffectingCombat, "player") or false
     if s and s.paused then
-      beltFs:SetText("|cffff9933Belt paused - App must NOT move belt|r")
+      beltFs:SetText("|cffff9933Session paused|r")
     elseif not s then
-      beltFs:SetText("|cff999999No session - App must NOT move belt|r")
+      beltFs:SetText("|cff999999Move or press Start to begin|r")
     elseif inCombat and DB.combatCrawl then
-      beltFs:SetText("|cffff6666Combat: Crawl mode|r")
+      beltFs:SetText("|cffff6666Combat — slow pace|r")
     elseif beltFresh() then                       -- real speed from the treadmill
       if beltReport.kmh > 0 then
         beltFs:SetText(string.format("|cff66ee66%s|r treadmill", fmtSpeed(beltReport.kmh)))

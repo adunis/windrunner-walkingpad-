@@ -8,7 +8,7 @@ panel at http://localhost:8765
 Game mode (Windows): the belt follows your in-game movement.
   Keyboard: hold W = walk, W + Shift = sprint, release = slow down / stop
   Gamepad (Xbox / XInput): left stick forward = proportional speed, stick click = sprint
-  F8 toggles game mode from inside the game (turning it off stops the belt).
+  Stop in the app releases game input and stops the belt.
 
 Requirements:  pip install bleak aiohttp
 Close the KS Fit / Mi Home app first: the pad only accepts one Bluetooth client.
@@ -27,7 +27,7 @@ from aiohttp import web, WSMsgType
 from bleak import BleakClient, BleakScanner
 
 PORT = 8765
-BUILD = "20261110-pixel-fix"   # replaced by the build script
+BUILD = "20261111-flow-ui"   # replaced by the build script
 SETTINGS_FILE = Path.home() / ".walkingpad_settings.json"
 LOG_FILE = Path.home() / "walkingpad_log.txt"
 
@@ -535,6 +535,7 @@ class Pad:
         self.address = address
         self.client = None
         self.queue = asyncio.Queue()
+        self.command_epoch = 0
         self.listeners = set()
         self.has_supplement = False
         self.pending_speed = None   # latest speed wish; older wishes are dropped
@@ -665,7 +666,11 @@ class Pad:
             except Exception as e:
                 self.log(f"Connection lost: {e}")
             self.client = None
+            self.cancel_pending()
             self.belt_on = False
+            self.target_speed = 0.0
+            if self.on_external_stop:
+                self.on_external_stop()
             self.state["connection"] = "disconnected"
             self.push()
             await asyncio.sleep(3)
@@ -725,6 +730,7 @@ class Pad:
         last = 0.0
         while self.client and self.client.is_connected:
             now = time.time()
+            epoch = self.command_epoch
             item = None
             if not self.queue.empty():
                 item = self.queue.get_nowait()
@@ -739,6 +745,8 @@ class Pad:
             gap = MIN_CMD_GAP - (time.time() - last)
             if gap > 0:
                 await asyncio.sleep(gap)
+            if epoch != self.command_epoch:
+                continue  # Stop/disconnect cancelled even an already-dequeued command.
             kind, payload = item
             try:
                 await self._write(kind, payload)
@@ -794,11 +802,15 @@ class Pad:
         self.target_speed = 0.0
         self.belt_on = True
 
-    def stop(self, reason="Stopping belt"):
-        # Emergency path: drop anything queued, stop immediately
+    def cancel_pending(self):
+        self.command_epoch += 1
         while not self.queue.empty():
             self.queue.get_nowait()
         self.pending_speed = None
+
+    def stop(self, reason="Stopping belt"):
+        # Cancel queued and waiting commands before scheduling the stop.
+        self.cancel_pending()
         self.belt_on = False
         self.target_speed = 0.0
         if not self.connected:
@@ -832,7 +844,11 @@ class Pad:
 
     def read_prefs(self):
         """No read command is known; re-sending child lock (unchanged) makes the pad report all settings."""
-        lock = bool((self.state.get("prefs") or {}).get("child_lock", False))
+        prefs = self.state.get("prefs")
+        if prefs is None or "child_lock" not in prefs:
+            self.log("Settings not reported yet; refresh cannot safely guess the child-lock value.")
+            return
+        lock = bool(prefs["child_lock"])
         self.set_pref("child_lock", lock)
 
     def set_mode(self, mode):
@@ -1041,8 +1057,8 @@ class GameMode:
 
     def on_external_stop(self):
         """The belt stopped without the app asking (pad remote, safety)."""
+        self.suppressed = True
         if self.link:
-            self.suppressed = True
             self.pad.log("Belt stopped from the pad — it stays stopped until you start moving in WoW again")
 
     def user_start(self, speed):
@@ -1056,8 +1072,7 @@ class GameMode:
 
     def user_stop(self, reason="Stopping belt"):
         """Stop button in the app / tray: always stops; Windrunner waits for a new move."""
-        if self.link:
-            self.suppressed = True
+        self.suppressed = True
         self.manual = False
         self.keys.release_all()
         self.sprinting = False
@@ -1114,6 +1129,11 @@ class GameMode:
             self.input_desc = "waiting for the treadmill to connect"
             return
         want, self.input_desc = self.desired_speed()
+        if self.suppressed:
+            self.input_desc = "stopped by you — release movement, then move again to restart"
+            if want <= 0:
+                self.suppressed = False
+            return
         if self.manual:
             if want > 0 or not pad.belt_on:
                 self.manual = False            # you moved in the game (or the belt stopped): game takes over
@@ -1156,7 +1176,7 @@ class GameMode:
         if self.suppressed and (moving_started or not r["run"]):
             self.suppressed = False          # a new move in WoW (or Windrunner stopped too): re-arm
         if self.manual:
-            if moving_started or not pad.belt_on:
+            if not r["run"] or moving_started or not pad.belt_on:
                 self.manual = False
             else:
                 self.link_desc = "started from the app — Windrunner takes over when you move"
@@ -1191,9 +1211,8 @@ class GameMode:
             if lost_for >= LINK_LOST_STOP:
                 pad.stop(f"Windrunner not visible for {LINK_LOST_STOP}s — stopping the belt")
         self.link_desc = f"WoW not visible ({int(lost_for)} s)"
-        if lost_for > 120:
-            self.link = False
-            pad.log("Windrunner link ended")
+        # Keep ownership until valid addon data returns or the user changes mode.
+        # Timing out must not silently enable keyboard/gamepad control.
 
     # -- Pad drives the game --
     def drive_step(self, windrunner_visible):
@@ -1202,7 +1221,7 @@ class GameMode:
         fresh = pad.connected and time.time() - pad.last_status_time < 3
         ok, title = game_window_ok(s)
         auto = pad.state.get("mode") == "auto"        # only Auto-mode walking drives the game
-        fwd = fresh and ok and auto and speed >= s["rev_move"]
+        fwd = fresh and ok and auto and not self.suppressed and speed >= s["rev_move"]
         if fwd and speed >= s["rev_sprint"]:
             self.sprinting = True
         elif not fwd or speed < s["rev_sprint"] - 0.3:      # small gap so it doesn't flicker
@@ -1268,6 +1287,8 @@ class GameMode:
         """Once a second, tell Windrunner the real belt speed (F11/F12 taps) while WoW is in front."""
         while True:
             await asyncio.sleep(1.0)
+            if getattr(self, "shutting_down", False):
+                return
             pad = self.pad
             try:
                 if not (pad.connected and time.time() - self.wr_seen_at < 5 and wow_in_front()):
@@ -1300,6 +1321,8 @@ class GameMode:
                     print(traceback.format_exc())
 
     def _tick(self, last_pub):
+        if getattr(self, "shutting_down", False):
+            return last_pub
         if True:
             r = self.wow.read() if IS_WINDOWS else None
             if r is None and getattr(self, "sim_wow", None):
@@ -1462,6 +1485,8 @@ async def main(open_browser=True):
 async def shutdown():
     """Closing the app: stop the treadmill, let go of game keys, free the Bluetooth connection."""
     if game:
+        game.shutting_down = True
+        game.s["direction"] = "none"
         game.keys.release_all()
         game.s["enabled"] = game.s["reverse"] = False
     if pad and pad.connected:

@@ -13,8 +13,8 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
 
 ## Download
 
-- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261110-pixel-fix)
-- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v2.7)
+- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261111-flow-ui)
+- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v2.8)
 
 - **App:** unzip and run `WalkingPad.exe`. Windows SmartScreen may warn because it isn't signed:
   *More info → Run anyway*. Close the KS Fit / Mi Home app first — the pad accepts one connection.
@@ -69,6 +69,21 @@ speed `F7 A2 01 <km/h×10>`; start `F7 A2 04 01`; settings `F7 A6 <key> 00 <v> <
 (keys 1–9; the pad answers with all settings). On the A1 Pro there's no Bluetooth command for the beep
 or to skip the 3-second start countdown. Built on the work of
 [ph4-walkingpad](https://github.com/ph4r05/ph4-walkingpad).
+
+## Flow and UI update (2026-11-11)
+
+- Stop waits for movement to be released before generic follow mode can restart.
+  In drive mode, press Start to re-enable movement after Stop.
+- Stop cancels commands already waiting for the Bluetooth command gap.
+- Shutdown disables game control before stopping; disconnect clears pending commands.
+- A missing WoW link retains control ownership instead of falling back to keyboard input.
+- Addon Pause overrides a manual app start; drive mode releases keys throughout stopping.
+- Windows: Control, Settings, and Diagnostics; only relevant speed controls appear.
+  WoW session controls and speeds live in Windrunner, with Stop always available in the app.
+- Addon: session controls first, optional speeds/toggles behind Settings, shorter status text.
+
+Validated with 16 regression tests, browser interaction checks at 500/380 px widths,
+and Lua syntax checking. WoW rendering and physical belt operation still need live testing.
 
 ## Building
 
