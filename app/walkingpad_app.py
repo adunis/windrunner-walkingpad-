@@ -27,7 +27,7 @@ from aiohttp import web, WSMsgType
 from bleak import BleakClient, BleakScanner
 
 PORT = 8765
-BUILD = "20261111-flow-ui"   # replaced by the build script
+BUILD = "dev"   # replaced by the build script
 SETTINGS_FILE = Path.home() / ".walkingpad_settings.json"
 LOG_FILE = Path.home() / "walkingpad_log.txt"
 
@@ -203,6 +203,163 @@ class _BMIH(ctypes.Structure):
                 ("biYPelsPerMeter", ctypes.c_long), ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD)]
 
 
+# ---- Windrunner link strip ---------------------------------------------------------
+# Windrunner (2.9+) draws a 2 x 19 grid of black / white blocks at the top-left of WoW's window.
+# Cells 0-3: white, black, white, black (finds the block size and what "white" / "black" look like).
+# Cells 4-37: 34 bits, MSB first: char speed yd/s x10 (8), flags (7), app mode, belt run,
+#             session active, in combat (4), wanted km/h x10 (6), always-1 (1),
+#             CRC-8 poly 0x07 over the first 26 bits (8).
+# Black / white plus a measured threshold survives HDR, Night Light, gamma, colour filters and
+# any resolution: blocks are about 1/135 of the screen height (8 px at 1080p, 16 px at 4K).
+STRIP_COLS, STRIP_ROWS, STRIP_SYNC = 19, 2, 4
+STRIP_PAYLOAD = 26
+FLAG_NAMES = ("moving", "mounted", "known", "swimming", "taxi", "vehicle", "walking")
+
+
+def crc8(bits):
+    crc = 0
+    for b in bits:
+        fb = ((crc >> 7) & 1) ^ b
+        crc = (crc << 1) & 0xFF
+        if fb:
+            crc ^= 0x07
+    return crc
+
+
+def _bits(v, n):
+    return [(v >> i) & 1 for i in range(n - 1, -1, -1)]
+
+
+def encode_strip(st):
+    """The 38 cells Windrunner draws (1 = white). Used by tests and the simulator; mirrors the addon."""
+    speed = min(250, int(round(st.get("speed", 0) * 10))) if st.get("known") else 0
+    payload = _bits(speed, 8) + [1 if st.get(k) else 0 for k in FLAG_NAMES]
+    payload += [1 if st.get(k) else 0 for k in ("app_mode", "run", "session_active", "in_combat")]
+    payload += _bits(min(63, int(round(st.get("target", 0) * 10))), 6) + [1]
+    return [1, 0, 1, 0] + payload + _bits(crc8(payload), 8)
+
+
+def decode_bits(cells):
+    """38 cells → Windrunner state dict, or None if the checksum doesn't match."""
+    if len(cells) != STRIP_COLS * STRIP_ROWS or cells[:4] != [1, 0, 1, 0]:
+        return None
+    payload, crc = cells[4:4 + STRIP_PAYLOAD], cells[4 + STRIP_PAYLOAD:]
+    if payload[-1] != 1 or crc8(payload) != int("".join(map(str, crc)), 2):
+        return None
+    v = lambda bits: int("".join(map(str, bits)), 2)
+    d = {"speed": v(payload[0:8]) / 10}
+    for i, k in enumerate(FLAG_NAMES):
+        d[k] = bool(payload[8 + i])
+    d["app_mode"], d["session_active"], d["in_combat"] = bool(payload[15]), bool(payload[17]), bool(payload[18])
+    d["target"] = v(payload[19:25]) / 10
+    d["run"] = bool(payload[16]) and d["target"] > 0        # same rule as the 3-square protocol
+    return d
+
+
+def _lum(buf, stride, x, y):
+    j = y * stride + x * 4
+    return (buf[j] * 114 + buf[j + 1] * 587 + buf[j + 2] * 299) // 1000      # BGRA → brightness
+
+
+def find_strip(buf, w, h, stride=None, max_y=None):
+    """Locate the strip in a BGRA image (strip near the top-left). Returns (x0, y0, cell) or None."""
+    stride = stride or w * 4
+    if w <= 0 or h <= 0 or len(buf) < stride * h:
+        return None
+    for y in range(0, min(h, max_y or 48)):
+        n = min(w, 400)
+        row = [_lum(buf, stride, x, y) for x in range(n)]
+        hi, lo = max(row[:n]), min(row[:n])
+        if hi - lo < 40:
+            continue
+        thr = (hi + lo) / 2
+        bright = [v > thr for v in row]
+        x = 0
+        while x < min(n, 12) and not bright[x]:      # strip starts within a few px of the corner
+            x += 1
+        if x >= 12:
+            continue
+        x0, runs, cur = x, [], True
+        while x < n and len(runs) < 4:
+            start = x
+            while x < n and bright[x] == cur:
+                x += 1
+            runs.append(x - start)
+            cur = not cur
+        if len(runs) < 4:
+            continue
+        # white, black, white measure the block; the 4th (black) may merge with black data after it
+        cell = sum(runs[:3]) / 3
+        if cell >= 3 and all(0.6 * cell <= r <= 1.4 * cell for r in runs[:3]) and runs[3] >= 0.6 * cell:
+            return x0, y, cell
+    return None
+
+
+def read_strip(buf, w, h, x0, y0, cell, stride=None):
+    """Sample the 38 cells. Returns (state dict or None, contrast). Strict: every block must be
+    clearly white or black and even across its area, else the frame is rejected."""
+    stride = stride or w * 4
+    r = max(1, int(cell * 0.22))
+    lums, spreads = [], []
+    for i in range(STRIP_COLS * STRIP_ROWS):
+        cx = x0 + (i % STRIP_COLS + 0.5) * cell
+        cy = y0 + (i // STRIP_COLS + 0.5) * cell
+        vals = []
+        for dy in (-r, 0, r):
+            for dx in (-r, 0, r):
+                x, y = int(cx + dx), int(cy + dy)
+                if 0 <= x < w and 0 <= y < h:
+                    vals.append(_lum(buf, stride, x, y))
+        if not vals:
+            return None, 0
+        lums.append(sum(vals) / len(vals))
+        spreads.append(max(vals) - min(vals))
+    white, black = (lums[0] + lums[2]) / 2, (lums[1] + lums[3]) / 2
+    contrast = white - black
+    if contrast < 30:
+        return None, contrast
+    thr = (white + black) / 2
+    for v, sp in zip(lums, spreads):
+        if abs(v - thr) < 0.22 * contrast or sp > 0.5 * contrast:
+            return None, contrast                  # a grey / mixed block: not a clean strip
+    return decode_bits([1 if v > thr else 0 for v in lums]), contrast
+
+
+def locate_strip(buf, w, h, stride=None):
+    """Find the strip and the exact block size / offset whose checksum matches.
+    Returns ((x0, y0, cell), state, contrast) or None."""
+    f = find_strip(buf, w, h, stride)
+    if not f:
+        return None
+    fx, fy, est = f
+    best = None
+    for k in range(0, 15):                                  # est, est±2%, est±4% … ±14%
+        cell = est * (1 + ((k + 1) // 2) * 0.02 * (1 if k % 2 else -1))
+        if cell < 3:
+            continue
+        for y0 in (fy, fy - 1, fy + 1, fy - 2, fy + 2):
+            for x0 in (fx, fx - 1, fx + 1):
+                if x0 < 0 or y0 < 0:
+                    continue
+                d, contrast = read_strip(buf, w, h, x0, y0, cell, stride)
+                if d:
+                    return (x0, y0, cell), d, contrast
+    return best
+
+
+def decode_image(buf, w, h, stride=None):
+    """Find and decode the strip in one go (tests, diagnostics). Returns (state or None, info)."""
+    f = find_strip(buf, w, h, stride)
+    if not f:
+        return None, "strip not found"
+    loc = locate_strip(buf, w, h, stride)
+    if not loc:
+        return None, f"found something (blocks ~{f[2]:.1f} px) but it doesn't read cleanly"
+    (x0, y0, cell), d, contrast = loc
+    return d, f"blocks {cell:.1f} px at {x0},{y0}, contrast {contrast:.0f}"
+
+
+
 MARK_BGR = bytes([0x56, 0x34, 0x12])   # addon marker colour #123456, as stored in BGRA screenshots
 DATA_CHECK = 0xA5
 REQ_CHECK = 0x5A
@@ -259,7 +416,7 @@ def decode_request(r, g, b):
 def monitor_rects():
     """[(left, top, right, bottom)] for every monitor, in virtual-screen pixels."""
     rects = []
-    if not IS_WINDOWS:
+    if not IS_WINDOWS or "_u32" not in globals():
         return rects
     proc_t = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
                                 ctypes.POINTER(wintypes.RECT), wintypes.LPARAM)
@@ -273,17 +430,134 @@ def monitor_rects():
     return rects
 
 
+def exe_of_window(hwnd) -> str:
+    try:
+        u, k = ctypes.windll.user32, ctypes.windll.kernel32
+        pid = wintypes.DWORD()
+        u.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        k.OpenProcess.restype = wintypes.HANDLE
+        h = k.OpenProcess(0x1000, False, pid.value)
+        if not h:
+            return ""
+        try:
+            buf = ctypes.create_unicode_buffer(520)
+            size = wintypes.DWORD(520)
+            if k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                return buf.value.replace("/", "\\").split("\\")[-1].lower()
+        finally:
+            k.CloseHandle(h)
+    except Exception:
+        pass
+    return ""
+
+
+def find_wow_window():
+    """The visible WoW window's client area on screen: (left, top, width, height) or None."""
+    if not IS_WINDOWS or "_u32" not in globals():
+        return None
+    found = []
+    proc_t = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def cb(hwnd, _lp):
+        if not _u32.IsWindowVisible(hwnd) or _u32.IsIconic(hwnd):
+            return True
+        buf = ctypes.create_unicode_buffer(256)
+        _u32.GetWindowTextW(hwnd, buf, 256)
+        title, exe = buf.value, None
+        if "world of warcraft" in title.lower() or (title and (exe := exe_of_window(hwnd)).startswith("wow")
+                                                    and exe.endswith(".exe")):
+            rc = wintypes.RECT()
+            _u32.GetClientRect(hwnd, ctypes.byref(rc))
+            pt = wintypes.POINT(0, 0)
+            _u32.ClientToScreen(hwnd, ctypes.byref(pt))
+            if rc.right > 200 and rc.bottom > 150:
+                found.append((pt.x, pt.y, rc.right, rc.bottom))
+        return True
+
+    _u32.EnumWindows(proc_t(cb), 0)
+    return max(found, key=lambda r: r[2] * r[3]) if found else None
+
+
 class WowBridge:
-    """Reads the Windrunner addon's colour code from the screen."""
+    """Reads Windrunner from the screen: the black / white strip (2.9+), or the three colour
+    squares of older versions as a fallback."""
+
+    STRIP_CAP_W, STRIP_CAP_H = 800, 100     # enough for 40 px blocks (8K)
 
     def __init__(self):
         self.log = print
         self.last_diag = 0.0
-        self.pos = None
+        self.pos = None              # older 3-square protocol
+        self.strip = None            # (screen_x, screen_y, cell) once the strip is found
+        self.strip_misses = 0
+        self.strip_ok_at = 0.0
+        self.strip_search_at = 0.0
         self.last_search = 0.0
         self.misses = 0
         self.last = None
+        self.info = ""
         self.status = "looking for the WoW addon…"
+
+    def _strip_origins(self):
+        try:
+            win = find_wow_window()
+            if win:
+                return [("WoW window", win[0], win[1])]
+            return [(f"monitor {i}", l, t) for i, (l, t, r, b) in enumerate(monitor_rects(), 1)]
+        except Exception:
+            return []
+
+    def _strip_search(self):
+        for name, x, y in self._strip_origins():
+            _, _, w, h, buf = self._capture((x, y, self.STRIP_CAP_W, self.STRIP_CAP_H))
+            loc = locate_strip(buf, w, h)
+            if not loc:
+                continue
+            (x0, y0, cell), d, contrast = loc
+            # confirm with a second, fresh capture before trusting it
+            w2, h2 = int(STRIP_COLS * cell) + 4, int(STRIP_ROWS * cell) + 4
+            _, _, w2, h2, buf2 = self._capture((x + x0, y + y0, w2, h2))
+            d2, _ = read_strip(buf2, w2, h2, 0, 0, cell)
+            if not d2:
+                continue
+            self.strip = (x + x0, y + y0, cell)
+            self.info = f"{name}, blocks {cell:.1f} px, contrast {contrast:.0f}"
+            self.log(f"Windrunner found ({self.info})")
+            return d2
+        return None
+
+    def _strip_read(self):
+        """Returns a state dict, None (keep trying), or False (no strip: try the older squares)."""
+        now = time.time()
+        d = None
+        if self.strip:
+            x, y, cell = self.strip
+            w, h = int(STRIP_COLS * cell) + 4, int(STRIP_ROWS * cell) + 4
+            _, _, w, h, buf = self._capture((x, y, w, h))
+            d, _ = read_strip(buf, w, h, 0, 0, cell)
+            if not d:
+                self.strip_misses += 1
+                if self.strip_misses >= 6:             # window moved / resized / gone: search again
+                    self.strip = None
+        elif now - self.strip_search_at >= 1.0:
+            self.strip_search_at = now
+            d = self._strip_search()
+            if not d:
+                return False
+        else:
+            return False
+        if d:
+            self.strip_misses = 0
+            self.strip_ok_at = now
+            self.last = d
+            self.status = "ok"
+            return d
+        if now - self.strip_ok_at < 0.4:            # a torn frame: keep the last good reading briefly
+            return self.last
+        # never reinterpret a damaged frame as a switch to Manual mode: report link loss
+        self.last = None
+        self.status = "lost Windrunner (WoW minimised, covered, or closed?)"
+        return None
 
     def _capture(self, rect=None):
         if rect is None:
@@ -312,8 +586,27 @@ class WowBridge:
             _u32.ReleaseDC(None, hdc)
 
     def diagnose(self, x=None, y=None, w=None, h=None, buf=None):
-        """Log what the app sees at each monitor's top-left corner (colour values only)."""
+        """Explain what the app sees: the strip (saving a picture of WoW's corner), then the older squares."""
         self.last_diag = time.time()
+        try:
+            win = find_wow_window()
+            self.log("Link check: WoW window " + (f"{win[2]}x{win[3]} at ({win[0]},{win[1]})" if win else "not found"))
+            for name, ox, oy in self._strip_origins():
+                _, _, cw, ch, cbuf = self._capture((ox, oy, self.STRIP_CAP_W, self.STRIP_CAP_H))
+                d, info = decode_image(cbuf, cw, ch)
+                self.log(f"  strip, {name}: " + ("Windrunner OK — " + info if d else info))
+                try:
+                    from PIL import Image
+                    img = Image.frombuffer("RGBA", (cw, ch), cbuf, "raw", "BGRA", 0, 1)
+                    out = Path.home() / f"walkingpad_link_{name.replace(' ', '_')}.png"
+                    img.convert("RGB").save(out)
+                    self.log(f"    saved what the app sees: {out}")
+                except Exception:
+                    pass
+                if d:
+                    return
+        except Exception as e:
+            self.log(f"Strip check failed: {e}")
         try:
             if buf is None:
                 x, y, w, h, buf = self._capture()
@@ -331,16 +624,20 @@ class WowBridge:
                         cols.append(f"{buf[j + 2]:02x}{buf[j + 1]:02x}{buf[j]:02x}")
                 self.log(f"  monitor {i} {r - l}x{b - t} at ({l},{t}) top-left pixels: {' '.join(cols)}")
             if not found:
-                self.log("  Expected three solid blocks: 123456, a5……, 5a…… (6 pixels each in v2.7) — if the colours are close but not "
-                         "exact, turn off HDR / reset WoW gamma; if they're your desktop, WoW isn't fullscreen on that monitor.")
+                self.log("  Neither found. With Windrunner 2.9+ keep WoW's top-left corner visible, Windrunner in "
+                         "App mode and '/wr sync' on; send the saved picture if it still fails.")
         except Exception as e:
             self.log(f"Link check failed: {e}")
 
     def read(self):
         try:
+            if IS_WINDOWS and self.pos is None:
+                r = self._strip_read()
+                if r is not False:
+                    return r
             return self._read()
         except OSError as e:
-            self.pos, self.last = None, None
+            self.pos, self.strip, self.last = None, None, None
             self.status = str(e)
             return None
 
@@ -350,7 +647,7 @@ class WowBridge:
             return None
         now = time.time()
         if self.pos is None:
-            if now - self.last_search < 0.5:
+            if now - self.last_search < 2.0:
                 return None
             self.last_search = now
             x, y, w, h, buf = self._capture()

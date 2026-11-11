@@ -1,7 +1,7 @@
 ## Interface: 120105, 120107, 16001, 11509, 20506, 38002, 40402, 50504
 ## Title: Windrunner
 ## Notes: Walk on your treadmill while you play. Tracks time and distance walked on any treadmill, compares it with your character's travels, and can lock your movement unless you're walking (Hardcore). /wr
-## Version: 2.8
+## Version: 2.9
 ## SavedVariables: WindrunnerDB
 Lore.lua
 Windrunner.lua

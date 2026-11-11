@@ -102,15 +102,15 @@ local function say(msg)
 end
 
 ---------------------------------------------------------------------------------
--- Sync squares (read by WalkingPad Control)
---   1: #123456 marker
---   2: R=A5  G=character speed yd/s x10  B=flags
---   3: R=5A  G=wanted belt km/h x10      B=flags (bit0 App mode, bit1 belt should run, bit2 session active, bit3 in combat)
+-- Link strip (read by WalkingPad Control): 2 x 19 black / white blocks at the top-left.
+--   Cells 0-3: white, black, white, black (the app measures block size and white / black from them).
+--   Cells 4-37, MSB first: char speed yd/s x10 (8); moving, mounted, known, swimming, taxi, vehicle,
+--   walking (7); App mode, belt should run, session active, in combat (4); wanted km/h x10 (6);
+--   always 1 (1); CRC-8 poly 0x07 over the 26 bits before it (8).
+--   Pure black / white survives HDR, Night Light, gamma and colour filters, and the blocks scale
+--   with the screen (about 1/135 of its height: 8 px at 1080p, 16 px at 4K).
 ---------------------------------------------------------------------------------
-local BLOCK = 6              -- physical pixels; leave room to sample away from edges
-local FLAG_VALID, FLAG_MOVING, FLAG_MOUNTED, FLAG_KNOWN = 0x80, 0x01, 0x02, 0x04
-local FLAG_SWIM, FLAG_TAXI, FLAG_VEHICLE, FLAG_WALKING = 0x08, 0x10, 0x20, 0x40
-local REQ_APPMODE, REQ_RUN, REQ_SESSION_ACTIVE, REQ_IN_COMBAT = 0x01, 0x02, 0x04, 0x08
+local COLS, ROWS = 19, 2
 local COUNTDOWN = 5          -- seconds the treadmill needs to start (3-2-1 + speed-up)
 
 local bridge = CreateFrame("Frame", "WindrunnerBridgeFrame", UIParent)
@@ -120,26 +120,48 @@ bridge:SetFrameStrata("TOOLTIP")
 bridge:SetFrameLevel(9000)
 bridge:EnableMouse(false)
 local sq = {}
-for i = 1, 3 do sq[i] = bridge:CreateTexture(nil, "OVERLAY") end
-sq[1]:SetColorTexture(0x12 / 255, 0x34 / 255, 0x56 / 255, 1)
-sq[2]:SetColorTexture(0xA5 / 255, 0, FLAG_VALID / 255, 1)
-sq[3]:SetColorTexture(0x5A / 255, 0, FLAG_VALID / 255, 1)
+for i = 1, COLS * ROWS do
+  sq[i] = bridge:CreateTexture(nil, "OVERLAY")
+  sq[i]:SetColorTexture(0, 0, 0, 1)
+  if sq[i].SetSnapToPixelGrid then sq[i]:SetSnapToPixelGrid(true); sq[i]:SetTexelSnappingBias(0) end
+end
 
 local function layoutBridge()
   local _, ph = GetPhysicalScreenSize()
   if not ph or ph <= 0 then ph = 1080 end
-  local s = BLOCK * 768 / ph / bridge:GetEffectiveScale()
+  local px = math.max(4, math.floor(ph / 135 + 0.5))         -- block size in real pixels
+  local s = px * 768 / ph / bridge:GetEffectiveScale()        -- … in UI units
   bridge:ClearAllPoints()
   bridge:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
-  bridge:SetSize(s * 3, s)
-  for i = 1, 3 do
-    sq[i]:ClearAllPoints(); sq[i]:SetPoint("TOPLEFT", bridge, "TOPLEFT", s * (i - 1), 0); sq[i]:SetSize(s, s)
+  bridge:SetSize(s * COLS, s * ROWS)
+  for i = 1, COLS * ROWS do
+    local c, r = (i - 1) % COLS, math.floor((i - 1) / COLS)
+    sq[i]:ClearAllPoints()
+    sq[i]:SetPoint("TOPLEFT", bridge, "TOPLEFT", s * c, -s * r)
+    sq[i]:SetSize(s, s)
   end
 end
 
 local function showSquares(on)
-  for i = 1, 3 do sq[i]:SetShown(on) end
+  for i = 1, COLS * ROWS do sq[i]:SetShown(on) end      -- the frame itself keeps running the addon's clock
 end
+
+local function crc8(bits)
+  local crc = 0
+  for _, b in ipairs(bits) do
+    local fb = (math.floor(crc / 128) + b) % 2
+    crc = (crc * 2) % 256
+    if fb == 1 then                                           -- crc = crc XOR 0x07 (the low three bits)
+      local low = crc % 8
+      crc = crc - low + (7 - low)
+    end
+  end
+  return crc
+end
+local function pushBits(t, v, n)
+  for i = n - 1, 0, -1 do t[#t + 1] = math.floor(v / 2 ^ i) % 2 end
+end
+Windrunner_CRC8 = crc8      -- for testing
 
 -- Belt speed for the character's state (App mode)
 local function wantedBelt(st)
@@ -200,36 +222,35 @@ local function bindLink()
 end
 local function beltFresh() return GetTime() - beltReport.at < 3 end
 
+local lastCells = {}
 local function updateSquares(st)
-  local flags = FLAG_VALID
-  if st.moving then flags = flags + FLAG_MOVING end
-  if st.mounted then flags = flags + FLAG_MOUNTED end
-  if st.known then flags = flags + FLAG_KNOWN end
-  if st.swimming then flags = flags + FLAG_SWIM end
-  if st.taxi then flags = flags + FLAG_TAXI end
-  if st.vehicle then flags = flags + FLAG_VEHICLE end
-  if st.walking then flags = flags + FLAG_WALKING end
-  local g = st.known and math.min(250, math.floor(st.speed * 10 + 0.5)) or 0
-  sq[2]:SetColorTexture(0xA5 / 255, g / 255, flags / 255, 1)
-
-  local req = FLAG_VALID
   local sessionActive = DB.session ~= nil and not DB.session.paused
-  local inCombat = safe(UnitAffectingCombat, "player") or false
-
-  if DB.mode == "app" then
-    req = req + REQ_APPMODE
-    -- CRITICAL: Belt should ONLY run when session is active AND not paused
-    if sessionActive then
-      req = req + REQ_SESSION_ACTIVE
-      if beltWanted() then req = req + REQ_RUN end
-    end
-    -- Add combat flag for app to know
-    if inCombat then req = req + REQ_IN_COMBAT end
+  local inCombat = safe(UnitAffectingCombat, "player") and true or false
+  local app = DB.mode == "app"
+  local payload = {}
+  pushBits(payload, st.known and math.min(250, math.floor(st.speed * 10 + 0.5)) or 0, 8)
+  for _, f in ipairs({ st.moving, st.mounted, st.known, st.swimming, st.taxi, st.vehicle, st.walking }) do
+    payload[#payload + 1] = f and 1 or 0
   end
-
-  -- Send wanted belt speed (or 0 if session not active)
+  payload[#payload + 1] = app and 1 or 0
+  -- the belt should ONLY run when a session is active AND not paused
+  payload[#payload + 1] = (app and sessionActive and beltWanted()) and 1 or 0
+  payload[#payload + 1] = (app and sessionActive) and 1 or 0
+  payload[#payload + 1] = (app and inCombat) and 1 or 0
+  -- wanted belt speed (0 if no session is active)
   local kmh = sessionActive and wantedBelt(st) or 0
-  sq[3]:SetColorTexture(0x5A / 255, math.floor(kmh * 10 + 0.5) / 255, req / 255, 1)
+  pushBits(payload, math.min(63, math.floor(kmh * 10 + 0.5)), 6)
+  payload[#payload + 1] = 1
+  local cells = { 1, 0, 1, 0 }
+  for _, b in ipairs(payload) do cells[#cells + 1] = b end
+  pushBits(cells, crc8(payload), 8)
+  for i = 1, COLS * ROWS do
+    if lastCells[i] ~= cells[i] then
+      local v = cells[i]
+      sq[i]:SetColorTexture(v, v, v, 1)
+      lastCells[i] = v
+    end
+  end
 end
 
 ---------------------------------------------------------------------------------
@@ -1046,9 +1067,9 @@ SlashCmdList.WINDRUNNER = function(msg)
   elseif msg == "debug" then
     say("treadmill link:")
     local pw, ph = GetPhysicalScreenSize()
-    print(string.format("  display: %dx%d, bridge scale: %.3f, squares: %d physical pixels each",
-      pw, ph, bridge:GetEffectiveScale(), BLOCK))
-    print("  mode: " .. DB.mode .. ", sync squares: " .. (DB.bridge and "shown" or "HIDDEN")
+    print(string.format("  display: %dx%d, link strip: %d x %d blocks of %d px (black / white, top-left)",
+      pw or 0, ph or 0, COLS, ROWS, math.max(4, math.floor((ph or 1080) / 135 + 0.5))))
+    print("  mode: " .. DB.mode .. ", link strip: " .. (DB.bridge and "shown" or "HIDDEN")
       .. ", F11/F12 link keys: " .. (linkBound and "set" or "not set yet"))
     if beltReport.at > 0 then
       print(string.format("  last belt speed from the app: %.1f km/h, %.0f s ago (%d received, %d garbled)",

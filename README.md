@@ -13,8 +13,8 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
 
 ## Download
 
-- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261111-flow-ui)
-- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v2.8)
+- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261111-2205)
+- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v2.9)
 
 - **App:** unzip and run `WalkingPad.exe`. Windows SmartScreen may warn because it isn't signed:
   *More info → Run anyway*. Close the KS Fit / Mi Home app first — the pad accepts one connection.
@@ -54,8 +54,12 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
 
 WoW addons can't talk to other programs, so:
 
-- **Addon → app:** Windrunner draws three tiny coloured squares in the top-left corner of the screen;
-  the app reads those pixels. Run WoW in *Windowed (Fullscreen)*.
+- **Addon → app:** Windrunner (2.9+) draws a small strip of black and white blocks (2 × 19) in the
+  top-left corner of WoW, like a tiny barcode with a checksum. The app finds the WoW window on any
+  monitor, windowed or fullscreen, and reads it. Pure black / white with a measured threshold works
+  through HDR, Night Light, gamma and colour filters, and the blocks scale with the screen (8 px at
+  1080p, 16 px on a 4K TV). Keep WoW's top-left corner visible. *Check link* in the app saves a picture
+  of what it sees, for troubleshooting. The app still reads the three colour squares of older versions.
 - **App → addon:** once a second the app taps F11 / F12 to send the real belt speed, and numpad `/`
   to toggle walk / run. Windrunner binds those keys itself while it's loaded.
 - If WoW runs as administrator, Windows blocks the keys unless the app runs as administrator too
@@ -101,10 +105,10 @@ than a switch to Manual mode / keyboard control. Screen-capture failures clear
 stale readings. Speed changes of exactly 0.1 km/h are no longer skipped by
 floating-point rounding.
 
-For diagnosis, use `/wr debug` in WoW and the app's link check. Exact colour bytes
-are required: HDR or altered gamma can still prevent decoding. Test with WoW in
-Windowed (Fullscreen), Windrunner in App mode, sync squares shown, and the app in
-Belt follows the game. Windowed positioning is also discovered automatically.
+For diagnosis, use `/wr debug` in WoW and the app's link check. Since 2.9 the link
+is a black / white strip (see "How the link works"), so HDR, gamma, Night Light and
+any resolution no longer break it; the exact-colour squares are only a fallback for
+older addon versions.
 
 Regression checks: `python -m unittest discover -s tests -v`.
 Live WoW rendering and physical treadmill operation still require validation.
