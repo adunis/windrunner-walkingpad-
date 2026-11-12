@@ -13,8 +13,8 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
 
 ## Download
 
-- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261112-1213)
-- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v3.0)
+- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261112-1252)
+- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v3.1)
 
 - **App:** unzip and run `WalkingPad.exe`. Windows SmartScreen may warn because it isn't signed:
   *More info → Run anyway*. Close the KS Fit / Mi Home app first — the pad accepts one connection.
@@ -42,7 +42,8 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
   Right-click or **+** for Start / Pause / Stop. **Settings** (or `/wr settings`, or Esc → Options →
   AddOns → Windrunner) holds the setup: Manual / App, that mode's options, lore messages, miles.
 - **Manual mode** — any treadmill: Start / Pause / Stop and set your belt speed.
-- **App mode** — WalkingPad Control drives the belt from your character; the session starts when you move.
+- **App mode** — press **Start**, then WalkingPad Control drives the belt from your character. Without a
+  running session the belt never moves; moving your character shows *"Start a session to start moving the belt!"*
 - **Hardcore** (Manual mode) — movement keys locked unless a session runs. Never in combat.
 - **Lore messages** (on by default) — every 0.5 km a line in the spirit of Azeroth appears like a subtitle
   at the bottom of the screen, with your distance. Each class and race has its own lines — a Troll Priest

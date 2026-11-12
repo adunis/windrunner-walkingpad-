@@ -1492,7 +1492,7 @@ class GameMode:
             if pad.belt_on:
                 pad.stop("Windrunner: belt off")
             self.link_desc = ("stopped by you — start moving in WoW to restart" if self.suppressed
-                              else "belt off — start moving in WoW (or press Start in Windrunner)")
+                              else "belt off — press Start in Windrunner")
 
     def link_lost(self):
         """Windrunner was in control but isn't visible (WoW minimised / covered / closed)."""

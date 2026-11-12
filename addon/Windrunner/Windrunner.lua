@@ -9,6 +9,8 @@
 -- Hardcore (Manual mode): you can only move while a session runs.
 --   Never in combat (WoW doesn't allow addons to change keys then).
 -- Warning (Manual mode): "Your character is walking but you are not!"
+-- App mode: sessions start only with Start; moving without one shows
+--   "Start a session to start moving the belt!"
 -- Combat Crawl (App mode): forces minimum belt speed during combat.
 --
 -- /wr           show or hide the window     /wr settings  open the settings page
@@ -671,7 +673,7 @@ local pauseBtn = flat(more, "Pause", BW, 22, function()
   if s.paused then
     setPaused(false, DB.mode == "app" and "resumed, the treadmill is starting." or "resumed.")
   else
-    setPaused(true, DB.mode == "app" and "paused, the treadmill stops. Start moving again (or Resume) to continue."
+    setPaused(true, DB.mode == "app" and "paused, the treadmill stops. Press Resume to continue."
       or "paused.")
   end
   refresh()
@@ -950,7 +952,7 @@ refresh = function()
   -- settings page
   manualBtn:SetOn(not app)
   appBtn:SetOn(app)
-  modeHelp:SetText(app and "Your treadmill follows your character. Needs WalkingPad Control on \"Belt follows game\"."
+  modeHelp:SetText(app and "Press Start, then your treadmill follows your character. Needs WalkingPad Control on \"Belt follows game\"."
     or "Any treadmill: press Start and set your belt speed with - / +.")
   for _, w in ipairs(speedWidgets) do w:SetShown(app) end
   for key, fs in pairs(speedRows) do fs:SetText(fmtSpeed(DB[key])) end
@@ -979,7 +981,7 @@ refresh = function()
     if s and s.paused then
       beltFs:SetText("|cffff9933Session paused|r")
     elseif not s then
-      beltFs:SetText("|cff999999Move or press Start to begin|r")
+      beltFs:SetText("|cff999999Press Start to begin|r")
     elseif inCombat and DB.combatCrawl then
       beltFs:SetText("|cffff6666Combat — slow pace|r")
     elseif beltFresh() then                       -- real speed from the treadmill
@@ -995,7 +997,7 @@ refresh = function()
       if GetTime() < (s.warmup or 0) then beltFs:SetText("|cffffee44Starting…|r")
       else beltFs:SetText(string.format("~%s |cff999999est.|r", fmtSpeed(kmh))) end
     else
-      beltFs:SetText("|cff999999Move to start|r")
+      beltFs:SetText("|cff999999Press Start to begin|r")
     end
   else
     beltFs:SetText("Belt " .. fmtSpeed(DB.speed))
@@ -1025,18 +1027,12 @@ bridge:SetScript("OnUpdate", function(_, dt)
 
   -- App mode: STARTING to move starts the session (or resumes it) and so the treadmill.
   -- Only the start of a movement counts, so Pause sticks while you keep moving.
-  local startedMoving = st.moving and not wasMoving
   wasMoving = st.moving
-  if app and startedMoving and DB.bridge then
-    if not DB.session then
-      newSession(true)
-    elseif DB.session.paused then
-      setPaused(false, "you started moving: resumed, the treadmill is starting.")
-    end
-  end
 
-  -- Warning (Manual mode): character walks on foot, you don't
-  if not app and DB.warn and st.moving and onFoot(st) and not walkingNow() then
+  -- Sessions only start with the Start button (never by moving). Moving without one: remind.
+  if app and st.moving and not walkingNow() then
+    warn("|cffff3333Start a session to start moving the belt!|r")
+  elseif not app and DB.warn and st.moving and onFoot(st) and not walkingNow() then
     warn("|cffff3333Your character is walking but you are not!|r")
   end
 
@@ -1125,7 +1121,7 @@ bridge:SetScript("OnEvent", function(_, event, arg1)
     layoutBridge()
     bindLink()
     if arg1 and DB and DB.mode == "app" and DB.session and not DB.session.paused then
-      setPaused(true, "welcome back: your session is paused. Start moving to continue it.")
+      setPaused(true, "welcome back: your session is paused. Press Resume to continue it.")
     end
     if arg1 and DB and DB.hardcore and DB.mode == "manual" then
       say("|cffff3333Hardcore is on|r: " .. hardcoreHelp() .. " Turn it off with the checkbox or /wr hardcore.")
