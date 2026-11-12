@@ -11,12 +11,12 @@
 -- Warning (Manual mode): "Your character is walking but you are not!"
 -- Combat Crawl (App mode): forces minimum belt speed during combat.
 --
--- /wr           show or hide the window
+-- /wr           show or hide the window     /wr settings  open the settings page
 -- /wr history   last sessions in chat
 -- /wr miles     switch km / miles
 -- /wr warn      toggle the warning      /wr hardcore   toggle Hardcore
 -- /wr combat    toggle Combat Crawl (App mode only)
--- /wr sync      show or hide the sync squares (App mode needs them)
+-- /wr sync      show or hide the link strip (App mode needs it)
 -- /wr lore      toggle lore subtitles   /wr every 0.5  lore every 0.5 km   /wr testlore  preview
 -- /wr debug     treadmill link status
 --
@@ -34,7 +34,7 @@ local DEFAULTS = {
   warn = true, hardcore = true,
   speed = 3.0,                                     -- Manual mode belt speed (km/h)
   idle = 1.0, walk = 3.0, run = 5.0, mount = 6.0,  -- App mode belt speeds (km/h)
-  expanded = false, options = false, runFrom = 4.5,     -- figure runs / distance counts as "run" from this belt speed
+  expanded = false, runFrom = 4.5,     -- figure runs / distance counts as "run" from this belt speed
   lore = true, loreEvery = 0.5,        -- lore subtitles every this many km (or miles)
   combatCrawl = true,                  -- force crawl mode in combat
   session = nil, sessions = {},
@@ -110,7 +110,7 @@ end
 --   Pure black / white survives HDR, Night Light, gamma and colour filters, and the blocks scale
 --   with the screen (about 1/135 of its height: 8 px at 1080p, 16 px at 4K).
 ---------------------------------------------------------------------------------
-local COLS, ROWS = 19, 2
+local STRIP_COLS, STRIP_ROWS = 19, 2
 local COUNTDOWN = 5          -- seconds the treadmill needs to start (3-2-1 + speed-up)
 
 local bridge = CreateFrame("Frame", "WindrunnerBridgeFrame", UIParent)
@@ -120,7 +120,7 @@ bridge:SetFrameStrata("TOOLTIP")
 bridge:SetFrameLevel(9000)
 bridge:EnableMouse(false)
 local sq = {}
-for i = 1, COLS * ROWS do
+for i = 1, STRIP_COLS * STRIP_ROWS do
   sq[i] = bridge:CreateTexture(nil, "OVERLAY")
   sq[i]:SetColorTexture(0, 0, 0, 1)
   if sq[i].SetSnapToPixelGrid then sq[i]:SetSnapToPixelGrid(true); sq[i]:SetTexelSnappingBias(0) end
@@ -133,9 +133,9 @@ local function layoutBridge()
   local s = px * 768 / ph / bridge:GetEffectiveScale()        -- … in UI units
   bridge:ClearAllPoints()
   bridge:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
-  bridge:SetSize(s * COLS, s * ROWS)
-  for i = 1, COLS * ROWS do
-    local c, r = (i - 1) % COLS, math.floor((i - 1) / COLS)
+  bridge:SetSize(s * STRIP_COLS, s * STRIP_ROWS)
+  for i = 1, STRIP_COLS * STRIP_ROWS do
+    local c, r = (i - 1) % STRIP_COLS, math.floor((i - 1) / STRIP_COLS)
     sq[i]:ClearAllPoints()
     sq[i]:SetPoint("TOPLEFT", bridge, "TOPLEFT", s * c, -s * r)
     sq[i]:SetSize(s, s)
@@ -143,7 +143,7 @@ local function layoutBridge()
 end
 
 local function showSquares(on)
-  for i = 1, COLS * ROWS do sq[i]:SetShown(on) end      -- the frame itself keeps running the addon's clock
+  for i = 1, STRIP_COLS * STRIP_ROWS do sq[i]:SetShown(on) end      -- the frame itself keeps running the addon's clock
 end
 
 local function crc8(bits)
@@ -244,7 +244,7 @@ local function updateSquares(st)
   local cells = { 1, 0, 1, 0 }
   for _, b in ipairs(payload) do cells[#cells + 1] = b end
   pushBits(cells, crc8(payload), 8)
-  for i = 1, COLS * ROWS do
+  for i = 1, STRIP_COLS * STRIP_ROWS do
     if lastCells[i] ~= cells[i] then
       local v = cells[i]
       sq[i]:SetColorTexture(v, v, v, 1)
@@ -465,7 +465,7 @@ end
 -- the little runner on a treadmill belt (compact view only)
 local fig = CreateFrame("Frame", nil, ui)
 fig:SetSize(44, COMPACT_H - 4)
-fig:SetPoint("LEFT", ui, "LEFT", 6, 0)
+fig:SetPoint("TOPLEFT", ui, "TOPLEFT", 6, -2)   -- pinned to the top: stays put when the window opens
 fig:SetFrameLevel(ui:GetFrameLevel() + 1)  -- Above ui, but won't overlap expanded content
 local OX, OY = 20, 7            -- hip x, belt height inside the figure box
 
@@ -594,7 +594,7 @@ lockFs:SetJustifyH("RIGHT")
 local more = CreateFrame("Frame", nil, ui)
 more:SetPoint("TOPLEFT", ui, "TOPLEFT", 0, -COMPACT_H)
 more:SetPoint("TOPRIGHT", ui, "TOPRIGHT", 0, -COMPACT_H)
-more:SetHeight(162)
+more:SetHeight(84)
 local sep = more:CreateTexture(nil, "ARTWORK")
 sep:SetColorTexture(1, 1, 1, 0.08)
 sep:SetPoint("TOPLEFT", 8, 0); sep:SetPoint("TOPRIGHT", -8, 0); sep:SetHeight(1)
@@ -646,37 +646,26 @@ local function endSession()
   DB.session = nil
 end
 
--- row 1: mode + belt
-local manualBtn = flat(more, "Manual", 52, 18, function()
-  if DB.mode ~= "manual" then DB.mode = "manual"; say("Manual mode: any treadmill, set your belt speed with - / +.") end
-  refresh()
-end)
-manualBtn:SetPoint("TOPLEFT", more, "TOPLEFT", 8, -8)
-local appBtn = flat(more, "App", 40, 18, function()
-  if DB.mode ~= "app" then DB.mode = "app"; say("App mode: the treadmill follows your character (needs WalkingPad Control).") end
-  refresh()
-end)
-appBtn:SetPoint("LEFT", manualBtn, "RIGHT", 2, 0)
+-- Controls (shown with + / right-click): belt status, Start / Pause / Stop, Settings
 local beltFs = label(more, 11, "")
-beltFs:SetPoint("TOPLEFT", more, "TOPLEFT", 8, -31)
-beltFs:SetWidth(W - 16)
+beltFs:SetPoint("TOPLEFT", more, "TOPLEFT", 10, -12)
+beltFs:SetWidth(W - 70)
 
 local function step(v, d) return math.max(0.1, math.min(25, math.floor((v + d) * 10 + 0.5) / 10)) end
-local plusBtn = flat(more, "+", 18, 18, function() DB.speed = step(DB.speed, 0.1); refresh() end)
+local plusBtn = flat(more, "+", 20, 18, function() DB.speed = step(DB.speed, 0.1); refresh() end)
 plusBtn:SetPoint("TOPRIGHT", more, "TOPRIGHT", -8, -8)
-local minusBtn = flat(more, "-", 18, 18, function() DB.speed = step(DB.speed, -0.1); refresh() end)
+local minusBtn = flat(more, "-", 20, 18, function() DB.speed = step(DB.speed, -0.1); refresh() end)
 minusBtn:SetPoint("RIGHT", plusBtn, "LEFT", -2, 0)
 
--- row 2: Start / Pause / Stop
 local BW = (W - 16 - 4) / 3
-local startBtn = flat(more, "Start", BW, 20, function()
+local startBtn = flat(more, "Start", BW, 22, function()
   newSession()
   say(DB.mode == "app" and "session started, the treadmill is starting."
     or "session started. Set the belt speed with - / + whenever you change it.")
   refresh()
 end)
-startBtn:SetPoint("TOPLEFT", more, "TOPLEFT", 8, -50)
-local pauseBtn = flat(more, "Pause", BW, 20, function()
+startBtn:SetPoint("TOPLEFT", more, "TOPLEFT", 8, -32)
+local pauseBtn = flat(more, "Pause", BW, 22, function()
   local s = DB.session
   if not s then return end
   if s.paused then
@@ -688,27 +677,101 @@ local pauseBtn = flat(more, "Pause", BW, 20, function()
   refresh()
 end)
 pauseBtn:SetPoint("LEFT", startBtn, "RIGHT", 2, 0)
-local stopBtn = flat(more, "Stop", BW, 20, function()
+local stopBtn = flat(more, "Stop", BW, 22, function()
   endSession()
   refresh()
 end)
 stopBtn:SetPoint("LEFT", pauseBtn, "RIGHT", 2, 0)
 
-local settingsBtn = flat(more, "Settings +", W - 16, 18, function()
-  DB.options = not DB.options
+local openSettings                -- defined with the settings page below
+local settingsBtn = flat(more, "Settings", 70, 16, function() openSettings() end)
+settingsBtn:SetPoint("TOPRIGHT", more, "TOPRIGHT", -8, -60)
+settingsBtn:GetFontString():SetFont(FONT, 10, "")
+local modeFs = label(more, 10, "")
+modeFs:SetPoint("TOPLEFT", more, "TOPLEFT", 10, -63)
+modeFs:SetTextColor(0.55, 0.55, 0.52)
+
+---------------------------------------------------------------------------------
+-- Settings page: Esc > Options > AddOns > Windrunner (or the Settings button / /wr settings)
+---------------------------------------------------------------------------------
+local panel = CreateFrame("Frame", "WindrunnerSettingsPanel", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+panel.name = "Windrunner"
+panel:SetSize(340, 330)
+panel:Hide()
+local category
+if Settings and Settings.RegisterCanvasLayoutCategory and Settings.RegisterAddOnCategory then
+  local ok = pcall(function()
+    category = Settings.RegisterCanvasLayoutCategory(panel, "Windrunner")
+    Settings.RegisterAddOnCategory(category)
+  end)
+  if not ok then category = nil end
+elseif InterfaceOptions_AddCategory then
+  pcall(InterfaceOptions_AddCategory, panel)
+  category = "legacy"
+end
+if not category then               -- no options window available: a small floating panel instead
+  panel:SetPoint("TOPLEFT", ui, "TOPRIGHT", 6, 0)
+  panel:SetFrameStrata("DIALOG")
+  panel:EnableMouse(true)
+  if panel.SetBackdrop then
+    panel:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+    panel:SetBackdropColor(0.05, 0.05, 0.06, 0.95)
+    panel:SetBackdropBorderColor(0, 0, 0, 0.9)
+  end
+  local close = flat(panel, "Close", 50, 18, function() panel:Hide() end)
+  close:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -8, -8)
+end
+openSettings = function()
+  if category == "legacy" and InterfaceOptionsFrame_OpenToCategory then
+    InterfaceOptionsFrame_OpenToCategory(panel); InterfaceOptionsFrame_OpenToCategory(panel)
+  elseif category and category ~= "legacy" and Settings and Settings.OpenToCategory then
+    Settings.OpenToCategory(category:GetID())
+  else
+    panel:SetShown(not panel:IsShown())
+  end
+end
+panel:SetScript("OnShow", function() if refresh then refresh() end end)
+
+local function heading(text, y)
+  local fs = label(panel, 11, "")
+  fs:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, y)
+  fs:SetText(text)
+  fs:SetTextColor(ACCENT[1], ACCENT[2], ACCENT[3])
+  return fs
+end
+local titleFs = label(panel, 16, "")
+titleFs:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -16)
+titleFs:SetText("Windrunner")
+local subFs = label(panel, 10, "")
+subFs:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -38)
+subFs:SetText("Walk on your treadmill while you play.")
+subFs:SetTextColor(0.7, 0.7, 0.68)
+
+heading("Treadmill", -64)
+local manualBtn = flat(panel, "Manual", 70, 20, function()
+  if DB.mode ~= "manual" then DB.mode = "manual"; say("Manual mode: any treadmill, set your belt speed with - / +.") end
   refresh()
 end)
-settingsBtn:SetPoint("TOPLEFT", more, "TOPLEFT", 8, -77)
+manualBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -82)
+local appBtn = flat(panel, "App", 70, 20, function()
+  if DB.mode ~= "app" then DB.mode = "app"; say("App mode: the treadmill follows your character (needs WalkingPad Control).") end
+  refresh()
+end)
+appBtn:SetPoint("LEFT", manualBtn, "RIGHT", 2, 0)
+local modeHelp = label(panel, 10, "")
+modeHelp:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -108)
+modeHelp:SetWidth(310)
+modeHelp:SetWordWrap(true)
+modeHelp:SetTextColor(0.75, 0.75, 0.72)
 
--- Less-used options stay behind Settings.
 local function checkbox(text, y, key, onChange)
-  local cb = CreateFrame("CheckButton", nil, more, "UICheckButtonTemplate")
-  cb:SetSize(20, 20)
-  cb:SetPoint("TOPLEFT", more, "TOPLEFT", 5, y)
-  local fs = label(more, 10, "")
-  fs:SetPoint("LEFT", cb, "RIGHT", 1, 1)
+  local cb = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+  cb:SetSize(22, 22)
+  cb:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, y)
+  local fs = label(panel, 11, "")
+  fs:SetPoint("LEFT", cb, "RIGHT", 2, 1)
   fs:SetText(text)
-  fs:SetTextColor(0.85, 0.85, 0.82)
+  fs:SetTextColor(0.9, 0.9, 0.87)
   cb.text = fs
   cb:SetScript("OnClick", function(self)
     DB[key] = self:GetChecked() and true or false
@@ -722,37 +785,53 @@ local hardcoreHelp = function()
   return "in Manual mode you can only move while a walking session runs (press Start)."
 end
 
-local warnBox = checkbox("Warn when moving without a session", -104, "warn")
-local combatBox = checkbox("Slow down in combat", -149, "combatCrawl", function()
-  say(DB.combatCrawl and "Combat Crawl ON: treadmill will go to minimum speed during combat."
-    or "Combat Crawl off: normal speeds in combat.")
-end)
-local hardBox = checkbox("Hardcore: require a walking session", -125, "hardcore", function()
+-- Manual mode options
+local warnBox = checkbox("Warn when my character moves without a session", -136, "warn")
+local hardBox = checkbox("Hardcore: I can only move during a session", -160, "hardcore", function()
   say(DB.hardcore and ("|cffff3333Hardcore on|r: " .. hardcoreHelp() .. " In combat you can always move.")
     or "Hardcore off.")
 end)
-local loreBox = checkbox("Lore messages", -124, "lore", function()
-  say(DB.lore and string.format("lore messages on: one every %s %s. Change with /wr every <number>.",
-    DB.loreEvery, DB.units == "mi" and "mi" or "km") or "lore messages off.")
-end)
 
--- row 3 (App): belt speeds for idle / walking / running / mounted
-local speedRows, speedWidgets = {}, {}
-local ROWS = { { "idle", "Idle" }, { "walk", "Walk" }, { "run", "Run" }, { "mount", "Mount" } }
+-- App mode options: belt speed for each character state, combat
+local speedHead = heading("Belt speed while your character is…", -136)
+local speedRows, speedWidgets = {}, { speedHead }
+local ROWS = { { "idle", "Standing" }, { "walk", "Walking" }, { "run", "Running" }, { "mount", "Mounted" } }
 for i, r in ipairs(ROWS) do
   local key, name = r[1], r[2]
   local col, row = (i - 1) % 2, math.floor((i - 1) / 2)
-  local x, y = 8 + col * ((W - 16) / 2 + 2), -104 - row * 20
-  local n = label(more, 10, ""); n:SetPoint("TOPLEFT", more, "TOPLEFT", x, y - 3); n:SetText(name)
-  n:SetTextColor(0.7, 0.7, 0.68)
-  local v = label(more, 10, ""); v:SetPoint("TOPLEFT", more, "TOPLEFT", x + 34, y - 3)
-  local mb = flat(more, "-", 16, 16, function() DB[key] = math.max(0.5, math.min(6, step(DB[key], -0.5))); refresh() end)
-  mb:SetPoint("TOPLEFT", more, "TOPLEFT", x + 72, y)
-  local pb = flat(more, "+", 16, 16, function() DB[key] = math.max(0.5, math.min(6, step(DB[key], 0.5))); refresh() end)
+  local x, y = 16 + col * 156, -156 - row * 22
+  local n = label(panel, 11, ""); n:SetPoint("TOPLEFT", panel, "TOPLEFT", x, y - 3); n:SetText(name)
+  n:SetTextColor(0.8, 0.8, 0.77)
+  local v = label(panel, 11, ""); v:SetPoint("TOPLEFT", panel, "TOPLEFT", x + 60, y - 3)
+  local mb = flat(panel, "-", 18, 18, function() DB[key] = math.max(0.5, math.min(6, step(DB[key], -0.5))); refresh() end)
+  mb:SetPoint("TOPLEFT", panel, "TOPLEFT", x + 108, y)
+  local pb = flat(panel, "+", 18, 18, function() DB[key] = math.max(0.5, math.min(6, step(DB[key], 0.5))); refresh() end)
   pb:SetPoint("LEFT", mb, "RIGHT", 2, 0)
   speedRows[key] = v
   for _, w in ipairs({ n, v, mb, pb }) do table.insert(speedWidgets, w) end
 end
+local combatBox = checkbox("Slow the belt to a crawl in combat", -204, "combatCrawl", function()
+  say(DB.combatCrawl and "Combat Crawl ON: treadmill will go to minimum speed during combat."
+    or "Combat Crawl off: normal speeds in combat.")
+end)
+
+-- Both modes
+local extrasHead = heading("Extras", -240)
+local loreBox = checkbox("Lore messages", -258, "lore", function()
+  say(DB.lore and string.format("lore messages on: one every %s %s.", DB.loreEvery, DB.units == "mi" and "mi" or "km")
+    or "lore messages off.")
+end)
+local loreMinus = flat(panel, "-", 18, 18, function()
+  DB.loreEvery = math.max(0.5, step(DB.loreEvery or 0.5, -0.5)); refresh()
+end)
+loreMinus:SetPoint("TOPLEFT", panel, "TOPLEFT", 236, -260)
+local lorePlus = flat(panel, "+", 18, 18, function()
+  DB.loreEvery = math.min(10, step(DB.loreEvery or 0.5, 0.5)); refresh()
+end)
+lorePlus:SetPoint("LEFT", loreMinus, "RIGHT", 2, 0)
+local milesBox = checkbox("Show distances in miles", -282, "useMiles", function()
+  DB.units = DB.useMiles and "mi" or "km"
+end)
 
 -- hover: totals and hints
 ui:SetScript("OnEnter", function(self)
@@ -859,28 +938,33 @@ refresh = function()
     fmtDist(s and s.real or 0), hex, fmtDist(s and s.char or 0), name))
   lockFs:SetText(blocked and "|cffff4040LOCKED|r" or (s and s.paused and "|cffff9933PAUSED|r") or "")
 
-  -- expanded view
+  -- controls
   local open = DB.expanded
   more:SetShown(open)
-  fig:SetShown(not open)  -- Hide walking figure when expanded to prevent overlap
-  local extra = DB.options and (app and 202 or 180) or 104
-  more:SetHeight(extra - 2)
-  ui:SetHeight(COMPACT_H + (open and extra or 0))
-  settingsBtn:SetText(DB.options and "Settings -" or "Settings +")
+  ui:SetHeight(COMPACT_H + (open and 86 or 0))
   expandBtn:SetNormalTexture(open and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
-  manualBtn:SetOn(not app)
-  appBtn:SetOn(app)
   minusBtn:SetShown(not app)
   plusBtn:SetShown(not app)
-  for _, w in ipairs(speedWidgets) do w:SetShown(app and DB.options) end
+  modeFs:SetText(app and "App mode · WalkingPad Control" or "Manual mode · any treadmill")
+
+  -- settings page
+  manualBtn:SetOn(not app)
+  appBtn:SetOn(app)
+  modeHelp:SetText(app and "Your treadmill follows your character. Needs WalkingPad Control on \"Belt follows game\"."
+    or "Any treadmill: press Start and set your belt speed with - / +.")
+  for _, w in ipairs(speedWidgets) do w:SetShown(app) end
   for key, fs in pairs(speedRows) do fs:SetText(fmtSpeed(DB[key])) end
-  for _, cb in ipairs({ warnBox, hardBox }) do cb:SetShown(not app and DB.options); cb.text:SetShown(not app and DB.options) end
-  combatBox:SetShown(app and DB.options); combatBox.text:SetShown(app and DB.options)  -- Combat Crawl only in App mode
-  loreBox:SetShown(DB.options); loreBox.text:SetShown(DB.options)
-  loreBox:ClearAllPoints()
-  loreBox:SetPoint("TOPLEFT", more, "TOPLEFT", 5, app and -170 or -146)
+  for _, cb in ipairs({ warnBox, hardBox }) do cb:SetShown(not app); cb.text:SetShown(not app) end
+  combatBox:SetShown(app); combatBox.text:SetShown(app)
+  local ey = app and -240 or -196                  -- Extras sit right under the mode's own options
+  extrasHead:ClearAllPoints(); extrasHead:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, ey)
+  loreBox:ClearAllPoints(); loreBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, ey - 18)
+  loreMinus:ClearAllPoints(); loreMinus:SetPoint("TOPLEFT", panel, "TOPLEFT", 236, ey - 20)
+  milesBox:ClearAllPoints(); milesBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, ey - 42)
+  panel:SetHeight(app and 330 or 286)
   loreBox:SetChecked(DB.lore)
-  loreBox.text:SetText(string.format("Lore every %s %s", DB.loreEvery, DB.units == "mi" and "mi" or "km"))
+  loreBox.text:SetText(string.format("Lore messages every %s %s", DB.loreEvery, DB.units == "mi" and "mi" or "km"))
+  milesBox:SetChecked(DB.units == "mi")
 
   if s then
     startBtn:Disable(); pauseBtn:Enable(); stopBtn:Enable()
@@ -1056,6 +1140,10 @@ SLASH_WINDRUNNER1 = "/wr"
 SLASH_WINDRUNNER2 = "/windrunner"
 SlashCmdList.WINDRUNNER = function(msg)
   msg = (msg or ""):lower():match("^%s*(.-)%s*$")
+  if msg == "settings" or msg == "options" or msg == "config" then
+    openSettings()
+    return
+  end
   if msg == "history" then
     if #DB.sessions == 0 then say("no sessions yet.") return end
     say("last sessions:")
@@ -1068,7 +1156,7 @@ SlashCmdList.WINDRUNNER = function(msg)
     say("treadmill link:")
     local pw, ph = GetPhysicalScreenSize()
     print(string.format("  display: %dx%d, link strip: %d x %d blocks of %d px (black / white, top-left)",
-      pw or 0, ph or 0, COLS, ROWS, math.max(4, math.floor((ph or 1080) / 135 + 0.5))))
+      pw or 0, ph or 0, STRIP_COLS, STRIP_ROWS, math.max(4, math.floor((ph or 1080) / 135 + 0.5))))
     print("  mode: " .. DB.mode .. ", link strip: " .. (DB.bridge and "shown" or "HIDDEN")
       .. ", F11/F12 link keys: " .. (linkBound and "set" or "not set yet"))
     if beltReport.at > 0 then
@@ -1118,6 +1206,7 @@ SlashCmdList.WINDRUNNER = function(msg)
     refresh()
   elseif msg == "miles" or msg == "km" or msg == "units" then
     DB.units = DB.units == "km" and "mi" or "km"
+    DB.useMiles = DB.units == "mi"
     say("units: " .. (DB.units == "km" and "kilometres" or "miles"))
     refresh()
   else

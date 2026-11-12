@@ -13,8 +13,8 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
 
 ## Download
 
-- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261111-2205)
-- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v2.9)
+- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261112-1213)
+- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v3.0)
 
 - **App:** unzip and run `WalkingPad.exe`. Windows SmartScreen may warn because it isn't signed:
   *More info → Run anyway*. Close the KS Fit / Mi Home app first — the pad accepts one connection.
@@ -23,7 +23,7 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
 
 ## WalkingPad Control
 
-- Live speed, time, distance, steps; start / stop / speed; Manual / Auto / Standby.
+- Live speed, time, distance, steps; start / stop / speed.
 - Pad settings: auto-mode sensitivity, max / start speed, smart start.
 - Gaming, one of three:
   - **Belt follows the game** — W walks, W+Shift sprints, gamepad stick = proportional speed. With
@@ -31,13 +31,16 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
   - **Pad drives the game** — walk forward on the pad in Auto mode and your character walks; faster = sprint.
     In WoW your character switches walk/run to match the belt.
   - **Treadmill only** — games are ignored.
-- Closing the window stops the belt and releases held keys; minimising goes to the tray.
-- Lab tab: raw Bluetooth messages, for reverse engineering.
+- Its own window only (never a browser page). Closing it stops the belt and releases held keys;
+  minimising goes to the tray; starting it again brings the open window to the front.
+- Tabs: **Gaming**, **Treadmill** (auto-mode sensitivity, max / start speed, smart start), **Log**
+  (activity, build number, and Bluetooth tools for developers).
 
 ## Windrunner (WoW addon)
 
 - Compact window: walking / running figure, time, and *"5.00 km You / 3.00 km Thrall"*.
-  Right-click or **+** for controls.
+  Right-click or **+** for Start / Pause / Stop. **Settings** (or `/wr settings`, or Esc → Options →
+  AddOns → Windrunner) holds the setup: Manual / App, that mode's options, lore messages, miles.
 - **Manual mode** — any treadmill: Start / Pause / Stop and set your belt speed.
 - **App mode** — WalkingPad Control drives the belt from your character; the session starts when you move.
 - **Hardcore** (Manual mode) — movement keys locked unless a session runs. Never in combat.
@@ -115,7 +118,8 @@ Live WoW rendering and physical treadmill operation still require validation.
 
 Windows: run `app\build_exe.bat` (needs Python 3.12). Or run from source:
 `pip install bleak aiohttp pywebview pystray pillow` then `python app\walkingpad_app.py`.
-`--simulate` runs against a pretend treadmill; `--console` uses the browser instead of a window.
+`--simulate` runs against a pretend treadmill; `--console` runs without a window (developers;
+add `--browser` to open the panel in a browser).
 
 ## Safety
 

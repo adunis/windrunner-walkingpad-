@@ -1756,9 +1756,19 @@ async def ws_handler(req):
 
 LOOP = None
 READY = None
+SHOW_HOOK = None          # set by the desktop window: brings it to the front
 
 
-async def main(open_browser=True):
+async def show_handler(_req):
+    if SHOW_HOOK:
+        try:
+            SHOW_HOOK()
+        except Exception:
+            pass
+    return web.Response(text="ok")
+
+
+async def main(open_browser=False):
     global pad, game, LOOP
     LOOP = asyncio.get_running_loop()
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -1767,11 +1777,12 @@ async def main(open_browser=True):
     app = web.Application()
     app.router.add_get("/", index)
     app.router.add_get("/ws", ws_handler)
+    app.router.add_get("/show", show_handler)
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "127.0.0.1", PORT).start()
     print(f"WalkingPad Control build {BUILD}  http://localhost:{PORT}")
-    if open_browser:
+    if open_browser:                  # developer option only (--console --browser)
         webbrowser.open(f"http://localhost:{PORT}")
     if READY:
         READY.set()
@@ -1827,29 +1838,11 @@ def tray_image():
     return img
 
 
-def can_use_app_window():
-    """The app window needs .NET Framework 4.6.2+ and the Edge WebView2 runtime (standard on Windows 10/11)."""
-    if not IS_WINDOWS:
-        return False
-    import winreg
+def message_box(text, title="WalkingPad Control"):
     try:
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full") as k:
-            if winreg.QueryValueEx(k, "Release")[0] < 394802:
-                return False
-    except OSError:
-        return False
-    guid = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
-    for hive, path in ((winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{guid}"),
-                       (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{guid}"),
-                       (winreg.HKEY_CURRENT_USER, rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{guid}")):
-        try:
-            with winreg.OpenKey(hive, path) as k:
-                v = winreg.QueryValueEx(k, "pv")[0]
-                if v and v != "0.0.0.0":
-                    return True
-        except OSError:
-            pass
-    return False
+        ctypes.windll.user32.MessageBoxW(None, text, title, 0x40)
+    except Exception:
+        print(text)
 
 
 def port_in_use():
@@ -1869,8 +1862,12 @@ def run_desktop():
         if not port_in_use():
             break
         time.sleep(0.5)
-    else:                             # already running: just show it
-        webbrowser.open(url)
+    else:                             # already running: bring its window to the front, never a browser
+        try:
+            import urllib.request
+            urllib.request.urlopen(f"http://127.0.0.1:{PORT}/show", timeout=2).read()
+        except Exception:
+            pass
         return
     READY = threading.Event()
 
@@ -1908,10 +1905,13 @@ def run_desktop():
             w.show()
             try:
                 w.restore()
+                w.on_top = True           # pop it in front, then let it behave normally again
+                w.on_top = False
             except Exception:
                 pass
-        else:
-            webbrowser.open(url)
+
+    global SHOW_HOOK
+    SHOW_HOOK = show_window
 
     def stop_belt(*_):
         LOOP.call_soon_threadsafe(lambda: game.user_stop("Stopped from the tray"))
@@ -1935,8 +1935,6 @@ def run_desktop():
         print("Tray icon unavailable:", e)
 
     try:
-        if not can_use_app_window():
-            raise RuntimeError("Edge WebView2 / .NET not available")
         import webview
         window = webview.create_window("WalkingPad Control", url, width=500, height=760,
                                        min_size=(380, 480), background_color="#141412")
@@ -1957,12 +1955,12 @@ def run_desktop():
         window.events.minimized += on_minimized
         webview.start()                   # blocks until the window is closed
     except Exception as e:
-        print("App window unavailable, using the browser:", e)
+        print("App window could not open:", e)
         state["window"] = None
-        webbrowser.open(url)
-        if state["icon"]:
-            while not state["quitting"]:  # tray "Quit" ends it
-                time.sleep(0.5)
+        message_box("WalkingPad couldn't open its window.\n\n"
+                    "It needs the Microsoft Edge WebView2 Runtime, which is part of Windows 10 and 11 "
+                    "(search for \"WebView2 Runtime\" on microsoft.com if it was removed).\n\n"
+                    f"Details: {e}")
     quit_app()
 
 
@@ -1983,7 +1981,7 @@ if __name__ == "__main__":
         if IS_WINDOWS and "--console" not in sys.argv:
             run_desktop()
         else:
-            asyncio.run(main())
+            asyncio.run(main(open_browser="--browser" in sys.argv))
     except KeyboardInterrupt:
         pass
     finally:

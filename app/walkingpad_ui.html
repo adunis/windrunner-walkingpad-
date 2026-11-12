@@ -92,7 +92,7 @@
 <body>
 <main>
   <header>
-    <h1>WalkingPad</h1><span class="build" id="build"></span>
+    <h1>WalkingPad</h1>
     <span id="conn" class="pill">disconnected</span>
   </header>
 
@@ -120,17 +120,12 @@
         <button class="stop" id="stop" title="Space">Stop</button>
       </div>
     </div>
-    <details id="hardwareModes"><summary>Belt hardware mode</summary><div class="seg modes" id="modes">
-      <button data-mode="manual">Manual</button>
-      <button data-mode="auto">Auto</button>
-      <button data-mode="standby">Standby</button>
-    </div></details>
   </section>
 
   <nav class="tabs" id="tabs">
-    <button data-tab="gaming">Control</button>
-    <button data-tab="pad">Settings</button>
-    <button data-tab="log">Diagnostics</button>
+    <button data-tab="gaming">Gaming</button>
+    <button data-tab="pad">Treadmill</button>
+    <button data-tab="log">Log</button>
   </nav>
 
   <section class="tab panel" data-tab="gaming">
@@ -174,24 +169,17 @@
       <label>Sprint speed (km/h) <input data-k="sprint_speed" type="number" step="0.1" min="0.5" max="6"></label>
       <label>Stick min speed <input data-k="pad_min" type="number" step="0.1" min="0.5" max="6"></label>
       <label>Stick max speed <input data-k="pad_max" type="number" step="0.1" min="0.5" max="6"></label>
-      <label>WoW walking (km/h) <input data-k="wow_walk" type="number" step="0.1" min="0" max="6"></label>
-      <label>WoW running (km/h) <input data-k="wow_run" type="number" step="0.1" min="0" max="6"></label>
-      <label>WoW mounted (0 = rest) <input data-k="wow_mount" type="number" step="0.1" min="0" max="6"></label>
       <label>Crawl speed <input data-k="idle_speed" type="number" step="0.1" min="0.5" max="6"></label>
       <label>Stop after idle (s, 0 = never) <input data-k="idle_timeout" type="number" step="1" min="0"></label>
       <label>Pad → game: move from <input data-k="rev_move" type="number" step="0.1" min="0.1" max="6"></label>
       <label>Pad → game: sprint from <input data-k="rev_sprint" type="number" step="0.1" min="0.5" max="6"></label>
       <label>Pad → WoW: walk below (0 = run) <input data-k="rev_walk_below" type="number" step="0.1" min="0" max="6"></label>
-      <label style="grid-column:1/-1">Game window title (only react to / send keys to it) <input data-k="rev_window" placeholder="any window"></label>
     </div>
     </details>
   </section>
 
   <section class="tab panel" data-tab="pad">
-    <div class="row" style="justify-content:space-between">
-      <div class="label" style="margin:0">Auto-mode sensitivity</div>
-      <button id="readPrefs" title="Refresh settings already reported by the pad">Refresh</button>
-    </div>
+    <div class="label" style="margin:0">Auto-mode sensitivity</div>
     <div class="seg" id="sens" style="margin-top:6px">
       <button data-v="1">High</button><button data-v="2">Medium</button><button data-v="3">Low</button>
     </div>
@@ -205,16 +193,13 @@
       <div>Smart start<small>Auto mode: the belt starts when you step on</small></div>
       <label class="switch"><input type="checkbox" id="prefSmart"><i></i></label>
     </div>
-    <div class="toggle">
-      <div>Mute beeps<small id="soundNote">Connect to check support</small></div>
-      <label class="switch"><input type="checkbox" id="mute" disabled><i></i></label>
-    </div>
-    <div class="hint" id="prefsNote">Values appear when the pad reports its settings. Refresh is available after that.</div>
+    <div class="hint" id="prefsNote">The pad reports its current values after your first change here.</div>
   </section>
 
   <section class="tab panel lab" data-tab="log">
-    <div class="label">Activity</div><pre id="log"></pre>
-    <details><summary>Bluetooth tools</summary>
+    <pre id="log"></pre>
+    <div class="hint" id="build" style="margin-top:8px"></div>
+    <details><summary>Bluetooth tools (for developers)</summary>
     <div class="toggle">
       <div>Log raw messages<small>Every byte the pad sends, on every channel</small></div>
       <label class="switch"><input type="checkbox" id="rawOn"><i></i></label>
@@ -248,29 +233,24 @@
 
   function render(s) {
     state = s;
-    $("build").textContent = s.build ? "build " + s.build : "";
+    $("build").textContent = s.build ? "WalkingPad Control build " + s.build : "";
     $("conn").textContent = s.connection + (s.name ? ` · ${s.name}` : "");
     $("conn").className = "pill " + s.connection;
     $("speed").textContent = s.speed.toFixed(1);
-    $("belt").textContent = s.belt + (s.mode ? ` · ${s.mode} mode` : "");
+    $("belt").textContent = (s.belt || "—") + (s.mode === "auto" ? " · Auto" : "");
     $("time").textContent = fmtTime(s.time);
     $("dist").textContent = s.distance.toFixed(2);
     $("steps").textContent = s.steps;
-    document.querySelectorAll("#modes button").forEach(b => b.classList.toggle("on", b.dataset.mode === s.mode));
-    $("mute").disabled = !s.sound_control;
-    $("soundNote").textContent = s.connection !== "connected" ? "Connect to check support"
-      : s.sound_control ? "Experimental — may not work on every firmware" : "Not supported by this pad";
     $("log").textContent = s.log.join("\n");
     $("log").scrollTop = 1e9;
     $("rawOn").checked = !!s.raw_log;
     const p = s.prefs;
-    $("readPrefs").disabled = !p || s.connection !== "connected";
     document.querySelectorAll("#sens button").forEach(b => b.classList.toggle("on", !!p && +b.dataset.v === p.sensitivity));
     if (p) {
       if (document.activeElement !== $("prefMax")) $("prefMax").value = p.max_speed;
       if (document.activeElement !== $("prefStart")) $("prefStart").value = p.start_speed;
       $("prefSmart").checked = p.smart_start;
-      $("prefsNote").textContent = "Values reported by the pad.";
+      $("prefsNote").textContent = "Current values reported by the pad.";
     }
 
     const g = s.game || {};
@@ -288,7 +268,6 @@
     $("wowInstallWrap").style.display = preset === "wow" ? "flex" : "none";
     $("gameSetup").hidden = g.direction === "none";
     $("advanced").hidden = g.direction === "none";
-    $("hardwareModes").hidden = g.direction !== "none";
     const addonControls = g.direction === "follow" && (g.link || preset === "wow");
     document.querySelector(".stepper").hidden = addonControls || g.direction === "drive";
     $("start").hidden = addonControls;
@@ -325,8 +304,6 @@
   $("start").onclick = () => send({ action: "start", speed: +$("slider").value });
   function stopBelt() { clearTimeout(sendTimer); send({ action: "stop" }); }
   $("stop").onclick = stopBelt;
-  document.querySelectorAll("#modes button").forEach(b => b.onclick = () => send({ action: "mode", mode: b.dataset.mode }));
-  $("mute").onchange = e => send({ action: "sound", on: !e.target.checked });
 
   document.querySelectorAll("#dir button").forEach(b => b.onclick = () => send({ action: "game", settings: { direction: b.dataset.d } }));
   $("wowInstall").onclick = () => send({ action: "install_wow" });
@@ -366,7 +343,7 @@
     document.querySelectorAll("[data-k]").forEach(el => {
       const k = el.dataset.k;
       const drive = k.startsWith("rev_") && k !== "rev_window";
-      const follow = ["source", "idle", "idle_speed", "idle_timeout", "walk_speed", "sprint_speed", "pad_min", "pad_max", "wow_walk", "wow_run", "wow_mount"].includes(k);
+      const follow = ["source", "idle", "idle_speed", "idle_timeout", "walk_speed", "sprint_speed", "pad_min", "pad_max"].includes(k);
       el.closest("label").hidden = fields.some(([name]) => name === k)
         || (drive && g.direction !== "drive") || (follow && g.direction !== "follow")
         || (g.direction === "follow" && (preset === "wow" || g.link) && follow);
@@ -384,7 +361,6 @@
   $("prefMax").onchange = e => send({ action: "pref", name: "max_speed", value: +e.target.value });
   $("prefStart").onchange = e => send({ action: "pref", name: "start_speed", value: +e.target.value });
   $("prefSmart").onchange = e => send({ action: "pref", name: "smart_start", value: e.target.checked });
-  $("readPrefs").onclick = () => send({ action: "read_prefs" });
 
   $("rawOn").onchange = e => send({ action: "raw_log", on: e.target.checked });
   $("rawSend").onclick = () => send({ action: "raw", hex: $("rawHex").value, char: $("rawChar").value.trim(), crc: $("rawCrc").checked });
