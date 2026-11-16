@@ -1,0 +1,28 @@
+# Publishes a GitHub Release when a version tag (v3.3, v3.4...) is pushed:
+#   WalkingPad.exe  (from downloads/WalkingPad.zip, built with winbuild)
+#   Windrunner.zip  (the addon folder, packed from addon/Windrunner)
+# Notes come from RELEASE_NOTES.md.
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package
+        run: |
+          mkdir out
+          (cd addon && zip -qr ../out/Windrunner.zip Windrunner)
+          unzip -q downloads/WalkingPad.zip -d out
+          ls -la out
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/WalkingPad.exe out/Windrunner.zip \
+            --title "Windrunner ${GITHUB_REF_NAME#v} + WalkingPad Control" \
+            --notes-file RELEASE_NOTES.md --latest
