@@ -447,51 +447,59 @@ ui:SetScript("OnDragStart", ui.StartMoving)
 ui:SetScript("OnDragStop", ui.StopMovingOrSizing)
 ui:SetClampedToScreen(true)
 ui:SetFrameStrata("MEDIUM")
+-- WoW's own look: a tooltip-style frame, the game's buttons (UIPanelButtonTemplate) and gold / white text
+local GOLD = { 1.0, 0.82, 0.0 }
+local TOOLTIP_BACKDROP = {
+  bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+  tile = true, tileSize = 16, edgeSize = 14, insets = { left = 3, right = 3, top = 3, bottom = 3 },
+}
 if ui.SetBackdrop then
-  ui:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
-  ui:SetBackdropColor(0.05, 0.05, 0.06, 0.86)
-  ui:SetBackdropBorderColor(0, 0, 0, 0.9)
+  ui:SetBackdrop(TOOLTIP_BACKDROP)
+  ui:SetBackdropColor(0.02, 0.02, 0.03, 0.88)
+  ui:SetBackdropBorderColor(0.75, 0.75, 0.75, 1)
 end
-local accentBar = ui:CreateTexture(nil, "ARTWORK")
-accentBar:SetPoint("TOPLEFT", ui, "TOPLEFT", 1, -1)
-accentBar:SetPoint("BOTTOMLEFT", ui, "TOPLEFT", 3, -COMPACT_H + 1)
-accentBar:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], 0.9)
 
 local function label(parent, size, flags)
   local fs = parent:CreateFontString(nil, "OVERLAY")
   fs:SetFont(FONT, size, flags or "")
+  fs:SetShadowOffset(1, -1)                    -- the game's text shadow
+  fs:SetShadowColor(0, 0, 0, 1)
   fs:SetJustifyH("LEFT")
   fs:SetWordWrap(false)
   return fs
 end
 
 local function flat(parent, text, w, h, onClick)
-  local b = CreateFrame("Button", nil, parent)
+  local ok, b = pcall(CreateFrame, "Button", nil, parent, "UIPanelButtonTemplate")   -- the game's red button
+  if not ok then b = CreateFrame("Button", nil, parent) end
   b.wrButton = true
   b:SetSize(w, h or 18)
-  b.bg = b:CreateTexture(nil, "BACKGROUND")
-  b.bg:SetAllPoints()
-  b.bg:SetColorTexture(1, 1, 1, 0.07)
-  local hl = b:CreateTexture(nil, "HIGHLIGHT")
-  hl:SetAllPoints()
-  hl:SetColorTexture(1, 1, 1, 0.10)
-  local fs = b:CreateFontString(nil, "OVERLAY")
-  fs:SetFont(FONT, 11, "")
-  fs:SetPoint("CENTER", 0, 0)
-  fs:SetTextColor(0.92, 0.92, 0.9)
-  b:SetFontString(fs)
+  local fs = b:GetFontString()
+  if type(fs) ~= "table" then
+    fs = b:CreateFontString(nil, "OVERLAY")
+    fs:SetFont(FONT, 11, "")
+    fs:SetPoint("CENTER", 0, 0)
+    b:SetFontString(fs)
+  end
+  if (h or 18) <= 20 and GameFontNormalSmall and b.SetNormalFontObject then
+    b:SetNormalFontObject(GameFontNormalSmall)
+    if GameFontHighlightSmall then b:SetHighlightFontObject(GameFontHighlightSmall) end
+    if GameFontDisableSmall then b:SetDisabledFontObject(GameFontDisableSmall) end
+  end
   b:SetText(text)
   b:SetScript("OnClick", onClick)
-  b:SetScript("OnDisable", function(self) self:GetFontString():SetAlpha(0.3) end)
-  b:SetScript("OnEnable", function(self) self:GetFontString():SetAlpha(1) end)
-  function b:SetOn(on)        -- highlighted (accent) state
-    if on then self.bg:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], 0.85)
-    else self.bg:SetColorTexture(1, 1, 1, 0.07) end
+  function b:SetOn(on)        -- the picked one of a set (Manual / App / Off): lit, white text
+    self.wrOn = on and true or false
+    if on then self:LockHighlight() else self:UnlockHighlight() end
+    local f = self:GetFontString()
+    if type(f) == "table" then
+      if on then f:SetTextColor(1, 1, 1) else f:SetTextColor(GOLD[1], GOLD[2], GOLD[3]) end
+    end
   end
   return b
 end
 
-NS.FONT, NS.fmtDist, NS.fmtTime, NS.flat, NS.label, NS.ACCENT = FONT, fmtDist, fmtTime, flat, label, ACCENT
+NS.FONT, NS.fmtDist, NS.fmtTime, NS.flat, NS.label, NS.ACCENT, NS.GOLD, NS.TOOLTIP_BACKDROP = FONT, fmtDist, fmtTime, flat, label, ACCENT, GOLD, TOOLTIP_BACKDROP
 
 -- the little runner on a treadmill belt (compact view only)
 local fig = CreateFrame("Frame", nil, ui)
@@ -627,7 +635,7 @@ more:SetPoint("TOPLEFT", ui, "TOPLEFT", 0, -COMPACT_H)
 more:SetPoint("TOPRIGHT", ui, "TOPRIGHT", 0, -COMPACT_H)
 more:SetHeight(84)
 local sep = more:CreateTexture(nil, "ARTWORK")
-sep:SetColorTexture(1, 1, 1, 0.08)
+sep:SetColorTexture(GOLD[1], GOLD[2], GOLD[3], 0.18)
 sep:SetPoint("TOPLEFT", 8, 0); sep:SetPoint("TOPRIGHT", -8, 0); sep:SetHeight(1)
 
 local refresh
@@ -637,7 +645,7 @@ local function setExpanded(on)
 end
 local expandBtn = CreateFrame("Button", nil, ui)
 expandBtn:SetSize(14, 14)
-expandBtn:SetPoint("TOPRIGHT", ui, "TOPRIGHT", -5, -5)
+expandBtn:SetPoint("TOPRIGHT", ui, "TOPRIGHT", -7, -7)
 expandBtn:SetNormalTexture("Interface\\Buttons\\UI-PlusButton-Up")
 expandBtn:SetHighlightTexture("Interface\\Buttons\\UI-PlusButton-Hilight", "ADD")
 expandBtn:SetScript("OnClick", function() setExpanded(not DB.expanded) end)
@@ -821,10 +829,8 @@ stopBtn:SetPoint("LEFT", pauseBtn, "RIGHT", 2, 0)
 local openSettings                -- defined with the settings page below
 local settingsBtn = flat(more, "Settings", 60, 18, function() openSettings() end)
 settingsBtn:SetPoint("TOPRIGHT", more, "TOPRIGHT", -8, -8)
-settingsBtn:GetFontString():SetFont(FONT, 10, "")
 local sessionsBtn = flat(more, "Sessions", 60, 18, function() if NS.openSessions then NS.openSessions(true) end end)
 sessionsBtn:SetPoint("RIGHT", settingsBtn, "LEFT", -4, 0)
-sessionsBtn:GetFontString():SetFont(FONT, 10, "")
 
 ---------------------------------------------------------------------------------
 -- Settings page: Esc > Options > AddOns > Windrunner (or the Settings button / /wr settings)
@@ -871,7 +877,7 @@ local function heading(text, y)
   local fs = label(panel, 11, "")
   fs:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, y)
   fs:SetText(text)
-  fs:SetTextColor(ACCENT[1], ACCENT[2], ACCENT[3])
+  fs:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
   return fs
 end
 local titleFs = label(panel, 16, "")
@@ -954,14 +960,12 @@ local wheelKey = flat(panel, "", 116, 18, function()
   setTrimKey(TRIM_KEYS[i % #TRIM_KEYS + 1])
 end)
 wheelKey:SetPoint("TOPLEFT", panel, "TOPLEFT", 96, -228)
-wheelKey:GetFontString():SetFont(FONT, 10, "")
 local wheelReset = flat(panel, "Reset", 48, 18, function()
   DB.trimWalk, DB.trimRun = 0, 0
   say("speed wheel reset: walking " .. fmtSpeed(DB.walk) .. ", running " .. fmtSpeed(DB.run) .. ".")
   refresh()
 end)
 wheelReset:SetPoint("LEFT", wheelKey, "RIGHT", 4, 0)
-wheelReset:GetFontString():SetFont(FONT, 10, "")
 local wheelHelp = label(panel, 10, ""); wheelHelp:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -250)
 wheelHelp:SetWidth(310); wheelHelp:SetWordWrap(true); wheelHelp:SetTextColor(0.7, 0.7, 0.67)
 for _, w in ipairs({ wheelName, wheelKey, wheelReset, wheelHelp }) do table.insert(speedWidgets, w) end
@@ -987,7 +991,7 @@ end)
 -- hover: totals and hints
 ui:SetScript("OnEnter", function(self)
   GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-  GameTooltip:AddLine("Windrunner", ACCENT[1], ACCENT[2], ACCENT[3])
+  GameTooltip:AddLine("Windrunner", GOLD[1], GOLD[2], GOLD[3])
   local total, tt = 0, 0
   for _, x in ipairs(DB.sessions) do total = total + x.real; tt = tt + x.time end
   if #DB.sessions > 0 then

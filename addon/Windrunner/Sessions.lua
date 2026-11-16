@@ -333,8 +333,12 @@ end
 
 local function build()
   local F = NS.FONT
-  local fmtDist, fmtTime, flat, label, ACCENT = NS.fmtDist, NS.fmtTime, NS.flat, NS.label, NS.ACCENT
-  win = CreateFrame("Frame", "WindrunnerSessionsFrame", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+  local fmtDist, fmtTime, flat, label, GOLD = NS.fmtDist, NS.fmtTime, NS.flat, NS.label, NS.GOLD
+  -- the game's standard window (title bar, close button, inset); a plain dialog frame if it's missing
+  local ok, f = pcall(CreateFrame, "Frame", "WindrunnerSessionsFrame", UIParent, "BasicFrameTemplateWithInset")
+  if not ok then f = CreateFrame("Frame", "WindrunnerSessionsFrame", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil) end
+  win = f
+  local templated = ok
   win:SetSize(WW, WH)
   win:SetPoint("CENTER")
   win:SetFrameStrata("HIGH")
@@ -342,43 +346,61 @@ local function build()
   win:RegisterForDrag("LeftButton")
   win:SetScript("OnDragStart", win.StartMoving)
   win:SetScript("OnDragStop", win.StopMovingOrSizing)
-  if win.SetBackdrop then
-    win:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
-    win:SetBackdropColor(0.05, 0.05, 0.06, 0.95)
-    win:SetBackdropBorderColor(0, 0, 0, 0.9)
-  end
   if UISpecialFrames then table.insert(UISpecialFrames, "WindrunnerSessionsFrame") end   -- Esc closes it
-  local bar = win:CreateTexture(nil, "ARTWORK")
-  bar:SetPoint("TOPLEFT", 1, -1); bar:SetPoint("TOPRIGHT", -1, -1); bar:SetHeight(2)
-  bar:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], 0.9)
-
-  local title = label(win, 15)
-  title:SetPoint("TOPLEFT", 14, -14)
-  title:SetText("Sessions")
-  local close = flat(win, "Close", 60, 20, function() win:Hide() end)
-  close:SetPoint("TOPRIGHT", -10, -10)
+  local titleFs = templated and (rawget(win, "TitleText") or rawget(win, "title"))
+  if type(titleFs) == "table" and titleFs.SetText then
+    titleFs:SetText("Windrunner — Sessions")
+  else
+    if win.SetBackdrop then
+      win:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 32, insets = { left = 11, right = 12, top = 12, bottom = 11 } })
+    end
+    local title = label(win, 14)
+    title:SetPoint("TOP", 0, -16)
+    title:SetText("Windrunner — Sessions")
+    title:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+    local close = flat(win, "Close", 60, 20, function() win:Hide() end)
+    close:SetPoint("TOPRIGHT", -14, -12)
+  end
+  -- the game's page arrows
+  local function arrow(dir, onClick)
+    local b = CreateFrame("Button", nil, win)
+    b:SetSize(26, 26)
+    local base = "Interface\\Buttons\\UI-SpellbookIcon-" .. (dir < 0 and "PrevPage" or "NextPage")
+    b:SetNormalTexture(base .. "-Up"); b:SetPushedTexture(base .. "-Down"); b:SetDisabledTexture(base .. "-Disabled")
+    b:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+    b:SetScript("OnClick", onClick)
+    return b
+  end
+  -- a quest log style row: highlight on hover, lit when picked
+  local function listRow(parent, w, h, onClick)
+    local b = CreateFrame("Button", nil, parent)
+    b:SetSize(w, h)
+    local hl = b:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints(); hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight"); hl:SetBlendMode("ADD")
+    b.sel = b:CreateTexture(nil, "BACKGROUND")
+    b.sel:SetAllPoints(); b.sel:SetTexture("Interface\\QuestFrame\\UI-QuestLogTitleHighlight"); b.sel:SetBlendMode("ADD")
+    b.sel:SetVertexColor(0.85, 0.72, 0.25, 0.85)
+    b.line = b:CreateTexture(nil, "BORDER")
+    b.line:SetPoint("BOTTOMLEFT", 6, 0); b.line:SetPoint("BOTTOMRIGHT", -6, 0); b.line:SetHeight(1)
+    b.line:SetColorTexture(1, 1, 1, 0.06)
+    b:SetScript("OnClick", onClick)
+    return b
+  end
 
   -- list
   for i = 1, ROWS_PER_PAGE do
-    local r = flat(win, "", LIST_W, 36, function(self) selected = (page - 1) * ROWS_PER_PAGE + i; mapIndex = 1; NS.refreshSessions() end)
+    local r = listRow(win, LIST_W, 36, function(self) selected = (page - 1) * ROWS_PER_PAGE + i; mapIndex = 1; NS.refreshSessions() end)
     r:SetPoint("TOPLEFT", 12, -44 - (i - 1) * 38)
-    r:GetFontString():Hide()
     r.a = label(r, 11); r.a:SetPoint("TOPLEFT", 8, -5); r.a:SetWidth(LIST_W - 80)
-    r.b = label(r, 11); r.b:SetPoint("TOPRIGHT", -8, -5); r.b:SetJustifyH("RIGHT")
-    r.c = label(r, 10); r.c:SetPoint("TOPLEFT", 8, -20); r.c:SetWidth(LIST_W - 16); r.c:SetTextColor(0.6, 0.6, 0.57)
-    r.mark = r:CreateTexture(nil, "ARTWORK")
-    r.mark:SetPoint("TOPLEFT"); r.mark:SetPoint("BOTTOMLEFT"); r.mark:SetWidth(3)
-    r.mark:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], 1)
-    function r:SetPicked(on)                        -- selected: a soft tint and an accent edge, text stays readable
-      self.bg:SetColorTexture(ACCENT[1], ACCENT[2], ACCENT[3], on and 0.22 or 0)
-      if not on then self.bg:SetColorTexture(1, 1, 1, 0.05) end
-      self.mark:SetShown(on)
-    end
+    r.b = label(r, 11); r.b:SetPoint("TOPRIGHT", -8, -5); r.b:SetJustifyH("RIGHT"); r.b:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
+    r.c = label(r, 10); r.c:SetPoint("TOPLEFT", 8, -20); r.c:SetWidth(LIST_W - 16); r.c:SetTextColor(0.62, 0.62, 0.6)
+    function r:SetPicked(on) self.sel:SetShown(on) end
     rows[i] = r
   end
-  win.prev = flat(win, "<", 28, 20, function() page = page - 1; NS.refreshSessions() end)
+  win.prev = arrow(-1, function() page = page - 1; NS.refreshSessions() end)
   win.prev:SetPoint("TOPLEFT", 12, -44 - ROWS_PER_PAGE * 38 - 4)
-  win.next = flat(win, ">", 28, 20, function() page = page + 1; NS.refreshSessions() end)
+  win.next = arrow(1, function() page = page + 1; NS.refreshSessions() end)
   win.next:SetPoint("TOPLEFT", 12 + LIST_W - 28, -44 - ROWS_PER_PAGE * 38 - 4)
   win.pageFs = label(win, 10)
   win.pageFs:SetPoint("TOP", win, "TOPLEFT", 12 + LIST_W / 2, -44 - ROWS_PER_PAGE * 38 - 8)
@@ -399,7 +421,14 @@ local function build()
   box:SetSize(MAP_W, MAP_H)
   box:SetPoint("TOPLEFT", X0, -100)
   local bg = box:CreateTexture(nil, "BACKGROUND")
-  bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.45)
+  bg:SetAllPoints(); bg:SetColorTexture(0, 0, 0, 0.5)
+  local frame = CreateFrame("Frame", nil, win, BackdropTemplateMixin and "BackdropTemplate" or nil)   -- a tooltip-style border
+  frame:SetPoint("TOPLEFT", box, "TOPLEFT", -4, 4); frame:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", 4, -4)
+  if frame.SetBackdrop then
+    frame:SetBackdrop({ edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border", edgeSize = 14 })
+    frame:SetBackdropBorderColor(0.75, 0.75, 0.75, 1)
+  end
+  frame:SetFrameLevel(box:GetFrameLevel() + 5)
   local clip = CreateFrame("Frame", nil, box)
   if clip.SetClipsChildren then clip:SetClipsChildren(true) end
   local canvas = CreateFrame("Frame", nil, clip)
@@ -415,17 +444,16 @@ local function build()
   win.mapNote:SetWordWrap(true)
   win.mapNote:SetJustifyH("CENTER")
   win.mapNote:SetTextColor(0.65, 0.65, 0.62)
-  win.mapPrev = flat(win, "<", 28, 20, function() mapIndex = mapIndex - 1; NS.refreshSessions() end)
-  win.mapPrev:SetPoint("TOPLEFT", X0, -100 - MAP_H - 6)
-  win.mapNext = flat(win, ">", 28, 20, function() mapIndex = mapIndex + 1; NS.refreshSessions() end)
-  win.mapNext:SetPoint("TOPLEFT", X0 + MAP_W - 28, -100 - MAP_H - 6)
+  win.mapPrev = arrow(-1, function() mapIndex = mapIndex - 1; NS.refreshSessions() end)
+  win.mapPrev:SetPoint("TOPLEFT", X0 - 2, -100 - MAP_H - 6)
+  win.mapNext = arrow(1, function() mapIndex = mapIndex + 1; NS.refreshSessions() end)
+  win.mapNext:SetPoint("TOPLEFT", X0 + MAP_W - 24, -100 - MAP_H - 6)
   win.mapName = label(win, 11)
   win.mapName:SetPoint("TOP", win, "TOPLEFT", X0 + MAP_W / 2, -100 - MAP_H - 10)
-  win.worldBtn = flat(win, "Show on world map", 130, 20, function()
+  win.worldBtn = flat(win, "Show on world map", 140, 22, function()
     if win.rec and NS.showOnWorldMap then NS.showOnWorldMap(win.rec, win.rec.mapOrder and win.rec.mapOrder[mapIndex]) end
   end)
   win.worldBtn:SetPoint("TOPLEFT", X0, -100 - MAP_H - 32)
-  win.worldBtn:GetFontString():SetFont(F, 10, "")
   win.hint = label(win, 10)
   win.hint:SetPoint("TOPLEFT", X0, -100 - MAP_H - 58)
   win.hint:SetWidth(MAP_W)
@@ -436,7 +464,7 @@ local function build()
 
   -- places
   win.placesHead = label(win, 12)
-  win.placesHead:SetTextColor(ACCENT[1], ACCENT[2], ACCENT[3])
+  win.placesHead:SetTextColor(GOLD[1], GOLD[2], GOLD[3])
   win.places = {}
   for i = 1, 12 do
     local r = CreateFrame("Frame", nil, win)

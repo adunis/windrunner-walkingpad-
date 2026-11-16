@@ -3,7 +3,15 @@
 - **WalkingPad.exe**: the Windows app. Just run it. If SmartScreen warns, choose *More info → Run anyway*.
 - **Windrunner.zip**: the WoW addon. Unzip it into `World of Warcraft\_retail_\Interface\AddOns` (or `_forever_`, `_classic_era_`…), so you get `AddOns\Windrunner\Windrunner.toc`.
 
-## New in Windrunner 3.5
+## New in Windrunner 3.6
+
+- **The game's own look**:
+  - The tracker uses a tooltip-style frame, WoW's red buttons, and gold and white text with the game's shadow.
+  - The Sessions window is a standard WoW window with a title bar and close button.
+  - Its list rows look like the quest log, and it uses the spellbook's page arrows.
+  - The map has a tooltip border.
+
+## Windrunner 3.5
 
 - **Speed wheel** (App mode): hold **Mouse button 4** and scroll to fine-tune the belt speed of what your character is doing.
   - Running: from just above your walking speed up to 6.0 km/h.
