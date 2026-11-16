@@ -17,6 +17,7 @@
 -- /wr manual | app | off    switch mode (off: Windrunner does nothing at all)
 -- /wr sessions  the Sessions window: every session, places (dungeons too) and routes on the map
 -- /wr route     your route on the world map (and OpenMap) on / off
+-- /wr wheel <button4|button5|alt|ctrl|shift|off|reset>   App mode speed wheel
 -- /wr miles     switch km / miles
 -- /wr warn      toggle the warning      /wr hardcore   toggle Hardcore
 -- /wr combat    toggle Combat Crawl (App mode only)
@@ -44,6 +45,8 @@ local DEFAULTS = {
   lore = true, loreEvery = 0.5,        -- lore subtitles every this many km (or miles)
   combatCrawl = true,                  -- force crawl mode in combat
   mapRoute = true,                     -- route on the world map (and OpenMap)
+  trimKey = "BUTTON4",                 -- App mode speed wheel: hold this and scroll (BUTTON4/5, ALT, CTRL, SHIFT, NONE)
+  trimWalk = 0, trimRun = 0,           -- the wheel's adjustment to the walking / running belt speed (km/h)
   session = nil, sessions = {},
 }
 local DB
@@ -171,6 +174,19 @@ end
 Windrunner_CRC8 = crc8      -- for testing
 
 -- Belt speed for the character's state (App mode)
+-- App mode speed wheel: walking can go down to the treadmill's minimum (not above your walking speed),
+-- running from just above walking up to the treadmill's maximum.
+local PAD_MIN, PAD_MAX = 0.5, 6.0
+local function r1(x) return math.floor(x * 10 + 0.5) / 10 end
+local function walkSpeed()
+  return r1(math.max(PAD_MIN, math.min(DB.walk, DB.walk + (DB.trimWalk or 0))))
+end
+local function runSpeed()
+  local lo = math.min(PAD_MAX, DB.walk + 0.1)
+  return r1(math.max(lo, math.min(PAD_MAX, DB.run + (DB.trimRun or 0))))
+end
+local lastGait = "run"
+
 local function wantedBelt(st)
   -- Combat crawl mode: force minimum speed in combat if enabled
   if DB.combatCrawl and safe(UnitAffectingCombat, "player") then
@@ -179,8 +195,9 @@ local function wantedBelt(st)
 
   if not st.moving then return DB.idle, "idle" end
   if not onFoot(st) then return DB.mount, st.taxi and "flight path" or "mounted" end
-  if st.known and st.speed <= 4.6 then return DB.walk, "walking" end
-  return DB.run, "running"
+  if st.known and st.speed <= 4.6 then lastGait = "walk"; return walkSpeed(), "walking" end
+  lastGait = "run"
+  return runSpeed(), "running"
 end
 
 -- App mode: the belt should run exactly while a session is running (not paused)
@@ -663,6 +680,69 @@ local function endSession()
   DB.session = nil
 end
 
+-- Speed wheel (App mode): hold Mouse button 4 (or 5, or Alt / Ctrl / Shift) and scroll to fine-tune the
+-- belt speed of what your character is doing now. Mouse buttons can't be modifiers in WoW's key
+-- bindings, so holding one switches the wheel over (a secure handler, so it also works in combat).
+local TRIM_KEYS = { "BUTTON4", "BUTTON5", "ALT", "CTRL", "SHIFT", "NONE" }
+local TRIM_NAMES = { BUTTON4 = "Mouse 4", BUTTON5 = "Mouse 5", ALT = "Alt", CTRL = "Ctrl",
+                     SHIFT = "Shift", NONE = "Off" }
+local function trimBelt(dir)
+  if DB.mode ~= "app" then return end
+  local st = charState()
+  local gait = lastGait
+  if st.moving and onFoot(st) then gait = (st.known and st.speed <= 4.6) and "walk" or "run" end
+  local v
+  if gait == "walk" then
+    DB.trimWalk = r1((DB.trimWalk or 0) + dir * 0.1)
+    v = walkSpeed(); DB.trimWalk = r1(v - DB.walk)
+  else
+    DB.trimRun = r1((DB.trimRun or 0) + dir * 0.1)
+    v = runSpeed(); DB.trimRun = r1(v - DB.run)
+  end
+  if UIErrorsFrame then
+    UIErrorsFrame:AddMessage(string.format("%s speed %s", gait == "walk" and "Walking" or "Running", fmtSpeed(v)), 1, 0.82, 0.3)
+  end
+  refresh()
+end
+local trimOwner = CreateFrame("Frame", "WindrunnerTrimOwner", UIParent)
+local trimUp = CreateFrame("Button", "WindrunnerTrimUp", UIParent)
+local trimDown = CreateFrame("Button", "WindrunnerTrimDown", UIParent)
+trimUp:SetScript("OnClick", function() trimBelt(1) end)
+trimDown:SetScript("OnClick", function() trimBelt(-1) end)
+local okHold, trimHold = pcall(CreateFrame, "Button", "WindrunnerTrimHold", UIParent, "SecureHandlerClickTemplate")
+if not okHold then trimHold = nil end
+if trimHold then
+  trimHold:RegisterForClicks("AnyDown", "AnyUp")
+  trimHold:SetAttribute("_onclick", [=[
+    if down then
+      self:SetBindingClick(true, "MOUSEWHEELUP", "WindrunnerTrimUp")
+      self:SetBindingClick(true, "MOUSEWHEELDOWN", "WindrunnerTrimDown")
+    else
+      self:ClearBindings()
+    end
+  ]=])
+end
+local trimPending = false
+local function bindTrim()
+  if InCombatLockdown() then trimPending = true; return end
+  trimPending = false
+  ClearOverrideBindings(trimOwner)
+  if trimHold then ClearOverrideBindings(trimHold) end
+  if not DB or DB.mode ~= "app" then return end
+  local k = DB.trimKey or "BUTTON4"
+  if (k == "BUTTON4" or k == "BUTTON5") and trimHold then
+    SetOverrideBindingClick(trimOwner, true, k, "WindrunnerTrimHold")
+  elseif k == "ALT" or k == "CTRL" or k == "SHIFT" then
+    SetOverrideBindingClick(trimOwner, true, k .. "-MOUSEWHEELUP", "WindrunnerTrimUp")
+    SetOverrideBindingClick(trimOwner, true, k .. "-MOUSEWHEELDOWN", "WindrunnerTrimDown")
+  end
+end
+local function setTrimKey(k)
+  DB.trimKey = k
+  bindTrim()
+  refresh()
+end
+
 -- Modes: manual (any treadmill), app (WalkingPad Control), off (Windrunner does nothing)
 local offUntil = 0                  -- after switching Off, the strip says "not App mode" briefly, then hides
 local function stripWanted() return DB.bridge and (DB.mode ~= "off" or GetTime() < offUntil) end
@@ -683,6 +763,7 @@ local function setMode(m)
     if wasOff then bindLink() end
     say(MODE_SAY[m])
   end
+  bindTrim()
   showSquares(stripWanted())
   refresh()
 end
@@ -865,6 +946,26 @@ local combatBox = checkbox("Slow the belt to a crawl in combat", -204, "combatCr
     or "Combat Crawl off: normal speeds in combat.")
 end)
 
+local wheelName = label(panel, 11, ""); wheelName:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -231)
+wheelName:SetText("Speed wheel"); wheelName:SetTextColor(0.8, 0.8, 0.77)
+local wheelKey = flat(panel, "", 116, 18, function()
+  local i = 1
+  for j, k in ipairs(TRIM_KEYS) do if k == (DB.trimKey or "BUTTON4") then i = j end end
+  setTrimKey(TRIM_KEYS[i % #TRIM_KEYS + 1])
+end)
+wheelKey:SetPoint("TOPLEFT", panel, "TOPLEFT", 96, -228)
+wheelKey:GetFontString():SetFont(FONT, 10, "")
+local wheelReset = flat(panel, "Reset", 48, 18, function()
+  DB.trimWalk, DB.trimRun = 0, 0
+  say("speed wheel reset: walking " .. fmtSpeed(DB.walk) .. ", running " .. fmtSpeed(DB.run) .. ".")
+  refresh()
+end)
+wheelReset:SetPoint("LEFT", wheelKey, "RIGHT", 4, 0)
+wheelReset:GetFontString():SetFont(FONT, 10, "")
+local wheelHelp = label(panel, 10, ""); wheelHelp:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -250)
+wheelHelp:SetWidth(310); wheelHelp:SetWordWrap(true); wheelHelp:SetTextColor(0.7, 0.7, 0.67)
+for _, w in ipairs({ wheelName, wheelKey, wheelReset, wheelHelp }) do table.insert(speedWidgets, w) end
+
 -- Both modes
 local extrasHead = heading("Extras", -240)
 local loreBox = checkbox("Lore messages", -258, "lore", function()
@@ -1016,12 +1117,17 @@ refresh = function()
   for key, fs in pairs(speedRows) do fs:SetText(fmtSpeed(DB[key])) end
   for _, cb in ipairs({ warnBox, hardBox }) do cb:SetShown(manual); cb.text:SetShown(manual) end
   combatBox:SetShown(app); combatBox.text:SetShown(app)
-  local ey = app and -240 or manual and -196 or -136  -- Extras sit right under the mode's own options
+  wheelKey:SetText("Hold: " .. (TRIM_NAMES[DB.trimKey or "BUTTON4"] or "Off"))
+  wheelHelp:SetText((DB.trimKey == "NONE") and "Off. Pick a key to fine-tune the belt speed with the mouse wheel while you play."
+    or string.format("Hold it and scroll: walking %s (%s–%s), running %s (%s–%s).",
+      fmtSpeed(walkSpeed()), fmtSpeed(PAD_MIN), fmtSpeed(DB.walk), fmtSpeed(runSpeed()),
+      fmtSpeed(math.min(PAD_MAX, DB.walk + 0.1)), fmtSpeed(PAD_MAX)))
+  local ey = app and -284 or manual and -196 or -136  -- Extras sit right under the mode's own options
   extrasHead:ClearAllPoints(); extrasHead:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, ey)
   loreBox:ClearAllPoints(); loreBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, ey - 18)
   loreMinus:ClearAllPoints(); loreMinus:SetPoint("TOPLEFT", panel, "TOPLEFT", 236, ey - 20)
   milesBox:ClearAllPoints(); milesBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, ey - 42)
-  panel:SetHeight(app and 330 or manual and 286 or 226)
+  panel:SetHeight(app and 374 or manual and 286 or 226)
   loreBox:SetChecked(DB.lore)
   loreBox.text:SetText(string.format("Lore messages every %s %s", DB.loreEvery, DB.units == "mi" and "mi" or "km"))
   milesBox:SetChecked(DB.units == "mi")
@@ -1169,6 +1275,7 @@ bridge:SetScript("OnEvent", function(_, event, arg1)
     blocked = false
   elseif event == "PLAYER_REGEN_ENABLED" then
     if unbindPending then unbindLink() end
+    if trimPending then bindTrim() end
     bindLink()
     updateBlock(true)
   elseif event == "UPDATE_BINDINGS" then
@@ -1191,6 +1298,7 @@ bridge:SetScript("OnEvent", function(_, event, arg1)
   elseif event == "PLAYER_ENTERING_WORLD" then
     layoutBridge()
     bindLink()
+    bindTrim()
     if arg1 and DB and DB.mode == "app" and DB.session and not DB.session.paused then
       setPaused(true, "welcome back: your session is paused. Press Resume to continue it.")
     end
@@ -1213,6 +1321,14 @@ SlashCmdList.WINDRUNNER = function(msg)
   end
   if msg == "settings" or msg == "options" or msg == "config" then
     openSettings()
+    return
+  end
+  local wheelArg = msg:match("^wheel%s*(%S*)$")
+  if wheelArg then
+    local k = wheelArg:upper():gsub("^MOUSE", "BUTTON"):gsub("^OFF$", "NONE")
+    if wheelArg == "reset" then DB.trimWalk, DB.trimRun = 0, 0; say("speed wheel reset."); refresh(); return end
+    if TRIM_NAMES[k] then setTrimKey(k); say("speed wheel: " .. (k == "NONE" and "off." or "hold " .. TRIM_NAMES[k] .. " and scroll."))
+    else say("speed wheel: /wr wheel button4 | button5 | alt | ctrl | shift | off | reset") end
     return
   end
   if msg == "route" then

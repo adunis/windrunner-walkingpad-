@@ -144,6 +144,129 @@ function NS.prune(list)
 end
 
 ---------------------------------------------------------------------------------
+-- Drawing a route (the Sessions window and the world map share this)
+--   segs: lines of pixel points { x1, y1, x2, y2, ... } (y down) from the anchor's top-left.
+--   A dark outline under a smoothed line with round joints, coloured from gold at the start to
+--   orange at the end (so you can see which way you went), and round start / end markers.
+---------------------------------------------------------------------------------
+local CIRCLE = "Interface\\CHARACTERFRAME\\TempPortraitAlphaMask"
+local C0, C1 = { 1.0, 0.90, 0.42 }, { 1.0, 0.42, 0.10 }
+
+function NS.routePool(parent) return { parent = parent, lines = {}, under = {}, joints = {}, marks = {} } end
+
+local function smooth(seg)                     -- light smoothing: each point pulled toward its neighbours
+  local n = #seg / 2
+  if n < 3 then return seg end
+  local out = { seg[1], seg[2] }
+  for k = 2, n - 1 do
+    out[#out + 1] = (seg[2 * k - 3] + 2 * seg[2 * k - 1] + seg[2 * k + 1]) / 4
+    out[#out + 1] = (seg[2 * k - 2] + 2 * seg[2 * k] + seg[2 * k + 2]) / 4
+  end
+  out[#out + 1], out[#out + 2] = seg[2 * n - 1], seg[2 * n]
+  return out
+end
+
+local function get(pool, kind, i, make)
+  local t = pool[kind][i]
+  if not t then t = make(); pool[kind][i] = t end
+  return t
+end
+
+local function circle(pool, i, sub)
+  return get(pool, "joints", i, function()
+    local t = pool.parent:CreateTexture(nil, "OVERLAY", nil, sub or 4)
+    t:SetTexture(CIRCLE)
+    return t
+  end)
+end
+
+function NS.hideRoute(pool)
+  for _, k in ipairs({ "lines", "under", "joints", "marks" }) do
+    for _, r in ipairs(pool[k]) do r:Hide() end
+  end
+end
+
+function NS.drawRoute(pool, anchor, segs, thick)
+  NS.hideRoute(pool)
+  if not pool.parent.CreateLine then return 0 end
+  local total = 0
+  for _, seg in ipairs(segs) do total = total + #seg / 2 end
+  if total < 1 then return 0 end
+  local li, ji, done, first, last = 0, 0, 0, nil, nil
+  local joints = thick >= 1.6
+  for _, raw in ipairs(segs) do
+    local seg = smooth(raw)
+    local n = #seg / 2
+    for k = 1, n do
+      local x, y = seg[2 * k - 1], seg[2 * k]
+      local f = done / math.max(1, total - 1)
+      local r, g, b = C0[1] + (C1[1] - C0[1]) * f, C0[2] + (C1[2] - C0[2]) * f, C0[3] + (C1[3] - C0[3]) * f
+      if k > 1 then
+        local px, py = seg[2 * k - 3], seg[2 * k - 2]
+        li = li + 1
+        local u = get(pool, "under", li, function() return pool.parent:CreateLine(nil, "OVERLAY", nil, 1) end)
+        u:SetColorTexture(0.05, 0.03, 0.02, 0.6)
+        u:SetThickness(thick + 2)
+        u:SetStartPoint("TOPLEFT", anchor, px, -py); u:SetEndPoint("TOPLEFT", anchor, x, -y)
+        u:Show()
+        local l = get(pool, "lines", li, function() return pool.parent:CreateLine(nil, "OVERLAY", nil, 3) end)
+        l:SetColorTexture(r, g, b, 1)
+        l:SetThickness(thick)
+        l:SetStartPoint("TOPLEFT", anchor, px, -py); l:SetEndPoint("TOPLEFT", anchor, x, -y)
+        l:Show()
+      end
+      if joints and k > 1 and k < n then          -- round joint: no notches where the line bends
+        ji = ji + 1
+        local j = circle(pool, ji)
+        j:SetVertexColor(r, g, b, 1)
+        j:SetSize(thick, thick)
+        j:ClearAllPoints(); j:SetPoint("CENTER", anchor, "TOPLEFT", x, -y)
+        j:Show()
+      end
+      first = first or { x, y }
+      last = { x, y }
+      done = done + 1
+    end
+  end
+  -- start / end markers: a dark ring around a coloured dot
+  local size = math.max(7, thick * 3.2)
+  for i, m in ipairs({ { first, 0.35, 0.95, 0.45 }, { last, 1.0, 0.27, 0.2 } }) do
+    local ring = get(pool, "marks", 2 * i - 1, function()
+      local t = pool.parent:CreateTexture(nil, "OVERLAY", nil, 6); t:SetTexture(CIRCLE); return t end)
+    ring:SetVertexColor(0.05, 0.03, 0.02, 0.85)
+    ring:SetSize(size + 3, size + 3)
+    ring:ClearAllPoints(); ring:SetPoint("CENTER", anchor, "TOPLEFT", m[1][1], -m[1][2]); ring:Show()
+    local dot = get(pool, "marks", 2 * i, function()
+      local t = pool.parent:CreateTexture(nil, "OVERLAY", nil, 7); t:SetTexture(CIRCLE); return t end)
+    dot:SetVertexColor(m[2], m[3], m[4], 1)
+    dot:SetSize(size, size)
+    dot:ClearAllPoints(); dot:SetPoint("CENTER", anchor, "TOPLEFT", m[1][1], -m[1][2]); dot:Show()
+  end
+  return li
+end
+
+-- points of one map's route, every `stride`-th kept (first and last always), through proj(x, y) -> pixels
+function NS.routePixels(segs, proj, maxLines)
+  local total = 0
+  for _, seg in ipairs(segs) do total = total + #seg / 2 end
+  local stride = math.max(1, math.floor(total / (maxLines or 700)))
+  local out = {}
+  for _, seg in ipairs(segs) do
+    local cur = {}
+    local n = #seg / 2
+    for k = 1, n do
+      if k == 1 or k == n or k % stride == 0 then
+        local x, y = proj(seg[2 * k - 1] / 10000, seg[2 * k] / 10000)
+        if x then cur[#cur + 1] = x; cur[#cur + 1] = y
+        elseif #cur > 0 then out[#out + 1] = cur; cur = {} end
+      end
+    end
+    if #cur >= 2 then out[#out + 1] = cur end
+  end
+  return out
+end
+
+---------------------------------------------------------------------------------
 -- The window
 ---------------------------------------------------------------------------------
 local win, rows, selected, page, mapIndex = nil, {}, 1, 1, 1
@@ -284,11 +407,8 @@ local function build()
   local over = CreateFrame("Frame", nil, clip)      -- the route, above the map tiles
   over:SetAllPoints(clip)
   over:SetFrameLevel(canvas:GetFrameLevel() + 2)
-  win.box, win.clip, win.canvas, win.over, win.tiles, win.lines = box, clip, canvas, over, {}, {}
-  win.startDot = over:CreateTexture(nil, "OVERLAY", nil, 7)
-  win.startDot:SetSize(7, 7); win.startDot:SetColorTexture(0.3, 0.95, 0.4, 1)
-  win.endDot = over:CreateTexture(nil, "OVERLAY", nil, 7)
-  win.endDot:SetSize(7, 7); win.endDot:SetColorTexture(1, 0.25, 0.2, 1)
+  win.box, win.clip, win.canvas, win.over, win.tiles = box, clip, canvas, over, {}
+  win.route = NS.routePool(over)
   win.mapNote = label(box, 11)
   win.mapNote:SetPoint("CENTER")
   win.mapNote:SetWidth(MAP_W - 40)
@@ -370,22 +490,9 @@ local function placeRows(list, x, width, allTimeView)
   win.noPlaces:SetText("No places recorded yet. Sessions from before Windrunner 3.3 have only their totals.")
 end
 
-local function line(i)
-  local l = win.lines[i]
-  if not l then
-    if not win.over.CreateLine then return nil end
-    l = win.over:CreateLine(nil, "OVERLAY")
-    l:SetThickness(2)
-    l:SetColorTexture(1, 0.78, 0.2, 0.95)
-    win.lines[i] = l
-  end
-  return l
-end
-
 local function drawMap(rec)
   for _, t in ipairs(win.tiles) do t:Hide() end
-  for _, l in ipairs(win.lines) do l:Hide() end
-  win.startDot:Hide(); win.endDot:Hide()
+  NS.hideRoute(win.route)
   local order = rec and rec.mapOrder or {}
   local n = #order
   win.mapPrev:SetShown(n > 1); win.mapNext:SetShown(n > 1)
@@ -429,36 +536,8 @@ local function drawMap(rec)
   end
 
   -- the route
-  local segs = segments(rec, map)
-  local total = 0
-  for _, seg in ipairs(segs) do total = total + #seg / 2 end
-  local stride = math.max(1, math.floor(total / 900))          -- at most ~900 lines on screen
-  local li, first, last = 0, nil, nil
-  for _, seg in ipairs(segs) do
-    local px, py
-    local npts = #seg / 2
-    for k = 1, npts do
-      if k == 1 or k == npts or k % stride == 0 then
-        local x, y = seg[2 * k - 1] / 10000 * dw, seg[2 * k] / 10000 * dh
-        if px then
-          li = li + 1
-          local l = line(li)
-          if l then
-            l:SetStartPoint("TOPLEFT", win.clip, px, -py)
-            l:SetEndPoint("TOPLEFT", win.clip, x, -y)
-            l:Show()
-          end
-        end
-        px, py = x, y
-        first = first or { x, y }
-        last = { x, y }
-      end
-    end
-  end
-  if first then
-    win.startDot:ClearAllPoints(); win.startDot:SetPoint("CENTER", win.clip, "TOPLEFT", first[1], -first[2]); win.startDot:Show()
-    win.endDot:ClearAllPoints(); win.endDot:SetPoint("CENTER", win.clip, "TOPLEFT", last[1], -last[2]); win.endDot:Show()
-  end
+  local px = NS.routePixels(segments(rec, map), function(x, y) return x * dw, y * dh end, 700)
+  win.routeLines = NS.drawRoute(win.route, win.clip, px, 2.4)
 end
 
 function NS.refreshSessions()

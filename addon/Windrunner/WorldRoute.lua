@@ -16,8 +16,8 @@ local function call(fn, ...)
   return unpack(r, 2)
 end
 
-local MAX_LINES = 1500
-local overlay, lines, dots, lastDraw = nil, {}, {}, 0
+local MAX_LINES = 900
+local overlay, pool, lastDraw = nil, nil, 0
 local picked                                   -- a saved session chosen in the Sessions window
 
 local function enabled() return WindrunnerDB and WindrunnerDB.mapRoute ~= false end
@@ -54,14 +54,9 @@ local function projector(zone, shown)
   return function(x, y) return r[1] + x * (r[2] - r[1]), r[3] + y * (r[4] - r[3]) end
 end
 
-local function hideAll()
-  for _, l in ipairs(lines) do l:Hide() end
-  for _, d in ipairs(dots) do d:Hide() end
-end
-
 local function draw()
   if not overlay then return end
-  hideAll()
+  NS.hideRoute(pool)
   local map = WorldMapFrame
   if not enabled() or not map or not map:IsShown() then return end
   local rec = routeRecord()
@@ -71,70 +66,26 @@ local function draw()
   if not shown or not canvas then return end
   local cw, ch = canvas:GetWidth(), canvas:GetHeight()
   if not cw or cw <= 0 then return end
-  -- above OpenMap's art (its own level), and lines stay ~2.5 px thick at any zoom
+  -- above OpenMap's art (its own level), and lines stay ~3 px thick on screen at any zoom
   local base = canvas:GetFrameLevel() + 1
   if openMap() and OpenMapAPI.ArtTopLevel then base = math.max(base, (OpenMapAPI.ArtTopLevel() or 0) + 1) end
   if overlay:GetFrameLevel() ~= base then overlay:SetFrameLevel(base) end
   local scale = canvas.GetEffectiveScale and canvas:GetEffectiveScale() or 1
-  local ui = UIParent:GetEffectiveScale()
-  local thick = 2.5 * ui / math.max(scale, 0.01)
+  local thick = 3 * UIParent:GetEffectiveScale() / math.max(scale, 0.01)
 
-  local total = 0
-  local work = {}
+  local all = {}
   for _, zone in ipairs(rec.mapOrder) do
     local proj = projector(zone, shown)
     if proj then
-      local segs = NS.segments(rec, zone)
-      for _, seg in ipairs(segs) do total = total + #seg / 2 end
-      work[#work + 1] = { proj = proj, segs = segs }
+      local px = NS.routePixels(NS.segments(rec, zone), function(x, y)
+        local cx, cy = proj(x, y)
+        if not cx then return nil end
+        return cx * cw, cy * ch
+      end, MAX_LINES / #rec.mapOrder)
+      for _, seg in ipairs(px) do all[#all + 1] = seg end
     end
   end
-  if total == 0 then return end
-  local stride = math.max(1, math.floor(total / MAX_LINES))
-  local n, first, last = 0, nil, nil
-  for _, w in ipairs(work) do
-    for _, seg in ipairs(w.segs) do
-      local px, py
-      local npts = #seg / 2
-      for k = 1, npts do
-        if k == 1 or k == npts or k % stride == 0 then
-          local x, y = w.proj(seg[2 * k - 1] / 10000, seg[2 * k] / 10000)
-          if x then
-            x, y = x * cw, y * ch
-            if px then
-              n = n + 1
-              local l = lines[n]
-              if not l then
-                l = overlay:CreateLine(nil, "OVERLAY")
-                l:SetColorTexture(1, 0.78, 0.2, 0.95)
-                lines[n] = l
-              end
-              l:SetThickness(thick)
-              l:SetStartPoint("TOPLEFT", canvas, px, -py)
-              l:SetEndPoint("TOPLEFT", canvas, x, -y)
-              l:Show()
-            end
-            px, py = x, y
-            first = first or { x, y }
-            last = { x, y }
-          else
-            px = nil
-          end
-        end
-      end
-    end
-  end
-  if first then
-    for i, p in ipairs({ { first, 0.3, 0.95, 0.4 }, { last, 1, 0.25, 0.2 } }) do
-      local d = dots[i]
-      if not d then d = overlay:CreateTexture(nil, "OVERLAY", nil, 7); dots[i] = d end
-      d:SetColorTexture(p[2], p[3], p[4], 1)
-      d:SetSize(thick * 3, thick * 3)
-      d:ClearAllPoints()
-      d:SetPoint("CENTER", canvas, "TOPLEFT", p[1][1], -p[1][2])
-      d:Show()
-    end
-  end
+  NS.drawRoute(pool, canvas, all, thick)
   lastDraw = GetTime()
 end
 NS.drawWorldRoute = draw
@@ -147,6 +98,7 @@ local function setup()
   overlay = CreateFrame("Frame", nil, canvas)
   overlay:SetAllPoints(canvas)
   overlay:EnableMouse(false)
+  pool = NS.routePool(overlay)
   map:HookScript("OnShow", draw)
   if map.OnMapChanged then hooksecurefunc(map, "OnMapChanged", draw) end
   if map.OnCanvasScaleChanged then hooksecurefunc(map, "OnCanvasScaleChanged", draw) end

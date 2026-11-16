@@ -58,6 +58,10 @@ From the **[latest release](https://github.com/adunis/windrunner-walkingpad-/rel
   switch in OpenMap's menu). `/wr route` turns it on or off.
 
   ![Sessions window](docs/sessions_window.png)
+- **Speed wheel** (App mode) — hold **Mouse button 4** and scroll to fine-tune the belt while you play:
+  it changes what your character is doing now. Running goes from just above your walking speed up to
+  6.0 km/h, walking from your walking speed down to 0.5 km/h (the treadmill's own limits), in 0.1 km/h steps.
+  Pick Mouse 5, Alt, Ctrl or Shift instead in Settings, or `/wr wheel alt`; `/wr wheel reset` undoes it.
 - **Hardcore** (Manual mode) — movement keys locked unless a session runs. Never in combat.
 - **Lore messages** (on by default) — every 0.5 km a line in the spirit of Azeroth appears like a subtitle
   at the bottom of the screen, with your distance. Each class and race has its own lines — a Troll Priest
@@ -65,7 +69,7 @@ From the **[latest release](https://github.com/adunis/windrunner-walkingpad-/rel
   distance are tracked separately. The lines are original, written in the spirit of Azeroth
   (`addon/Windrunner/Lore.lua`).
   `/wr lore` toggles them, `/wr every 1` changes the interval, `/wr testlore` previews one.
-- Commands: `/wr`, `/wr manual`, `/wr app`, `/wr off`, `/wr sessions`, `/wr route`, `/wr miles`, `/wr warn`, `/wr hardcore`, `/wr lore`, `/wr every <km>`, `/wr testlore`, `/wr sync`, `/wr debug`.
+- Commands: `/wr`, `/wr manual`, `/wr app`, `/wr off`, `/wr sessions`, `/wr route`, `/wr wheel`, `/wr miles`, `/wr warn`, `/wr hardcore`, `/wr lore`, `/wr every <km>`, `/wr testlore`, `/wr sync`, `/wr debug`.
 - Works on Retail, Forever and Classic clients.
 
 ## How the link works
