@@ -75,6 +75,23 @@ class FlowTests(unittest.TestCase):
             game.drive_step(False)
         self.assertTrue(all(call.args[1] is False for call in game.keys.set.call_args_list))
 
+    def test_manual_or_off_windrunner_leaves_belt_alone_in_follow_mode(self):
+        """Windrunner on screen but not in App mode: character movement must not start the belt."""
+        game = controller()
+        game.s.update(direction="follow", source="wow")
+        reading = dict(app_mode=False, moving=True, known=True, speed=7.0, mounted=False, taxi=False,
+                       vehicle=False, swimming=False, walking=False, run=False, session_active=False,
+                       in_combat=False, target=0)
+        game.wow = Mock()
+        game.wow.read.return_value = reading
+        game.wow.last = reading
+        game.pad.start = Mock()
+        with patch.object(app, "IS_WINDOWS", True):
+            for _ in range(5):
+                game._tick(0)
+        game.pad.start.assert_not_called()
+        self.assertIn("left alone", game.input_desc)
+
 
 class AsyncFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_stop_cancels_start_already_waiting_for_command_gap(self):

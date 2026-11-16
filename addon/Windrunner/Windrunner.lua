@@ -14,6 +14,7 @@
 -- Combat Crawl (App mode): forces minimum belt speed during combat.
 --
 -- /wr           show or hide the window     /wr settings  open the settings page
+-- /wr manual | app | off    switch mode (off: Windrunner does nothing at all)
 -- /wr history   last sessions in chat
 -- /wr miles     switch km / miles
 -- /wr warn      toggle the warning      /wr hardcore   toggle Hardcore
@@ -207,9 +208,9 @@ local bit0 = CreateFrame("Button", "WindrunnerLinkBit0", UIParent)
 local bit1 = CreateFrame("Button", "WindrunnerLinkBit1", UIParent)
 bit0:SetScript("OnClick", function() onBit(0) end)
 bit1:SetScript("OnClick", function() onBit(1) end)
-local linkBound = false
+local linkBound, unbindPending = false, false
 local function bindLink()
-  if linkBound or InCombatLockdown() then return end
+  if linkBound or InCombatLockdown() or (DB and DB.mode == "off") then return end
   for _, k in ipairs({ "F11", "F12", "NUMPADDIVIDE" }) do
     local was = GetBindingAction and GetBindingAction(k)
     if was and was ~= "" and was ~= "TOGGLERUN" then
@@ -221,6 +222,11 @@ local function bindLink()
   -- numpad / = walk/run toggle (WoW's default), so the app can switch your gait whatever you rebound
   SetOverrideBinding(linkOwner, true, "NUMPADDIVIDE", "TOGGLERUN")
   linkBound = true
+end
+local function unbindLink()          -- Off: F11 / F12 / numpad / go back to your own bindings
+  if InCombatLockdown() then unbindPending = true; return end
+  ClearOverrideBindings(linkOwner)
+  linkBound, unbindPending = false, false
 end
 local function beltFresh() return GetTime() - beltReport.at < 3 end
 
@@ -648,14 +654,51 @@ local function endSession()
   DB.session = nil
 end
 
--- Controls (shown with + / right-click): belt status, Start / Pause / Stop, Settings
+-- Modes: manual (any treadmill), app (WalkingPad Control), off (Windrunner does nothing)
+local offUntil = 0                  -- after switching Off, the strip says "not App mode" briefly, then hides
+local function stripWanted() return DB.bridge and (DB.mode ~= "off" or GetTime() < offUntil) end
+local MODE_SAY = {
+  manual = "Manual mode: any treadmill. Press Start and set your belt speed with - / +.",
+  app = "App mode: press Start, then the treadmill follows your character (needs WalkingPad Control).",
+  off = "Windrunner is off: no tracking, no reminders, the treadmill is left alone. Pick Manual or App to turn it back on.",
+}
+local function setMode(m)
+  if DB.mode ~= m then
+    if m == "off" then
+      if DB.session then endSession() end
+      offUntil = GetTime() + 3
+      unbindLink()
+    end
+    local wasOff = DB.mode == "off"
+    DB.mode = m
+    if wasOff then bindLink() end
+    say(MODE_SAY[m])
+  end
+  showSquares(stripWanted())
+  refresh()
+end
+
+-- Controls (shown with + / right-click): mode, Settings, belt status, Start / Pause / Stop
+local modeBtns = {}
+for i, m in ipairs({ { "manual", "Manual" }, { "app", "App" }, { "off", "Off" } }) do
+  local b = flat(more, m[2], 54, 18, function() setMode(m[1]) end)
+  b:SetPoint("TOPLEFT", more, "TOPLEFT", 8 + (i - 1) * 56, -8)
+  modeBtns[m[1]] = b
+end
+
 local beltFs = label(more, 11, "")
-beltFs:SetPoint("TOPLEFT", more, "TOPLEFT", 10, -12)
+beltFs:SetPoint("TOPLEFT", more, "TOPLEFT", 10, -36)
 beltFs:SetWidth(W - 70)
+local offFs = label(more, 10, "")
+offFs:SetPoint("TOPLEFT", more, "TOPLEFT", 10, -34)
+offFs:SetWidth(W - 20)
+offFs:SetWordWrap(true)
+offFs:SetTextColor(0.65, 0.65, 0.62)
+offFs:SetText("Windrunner is off: no tracking, no reminders, and the treadmill is left alone.")
 
 local function step(v, d) return math.max(0.1, math.min(25, math.floor((v + d) * 10 + 0.5) / 10)) end
 local plusBtn = flat(more, "+", 20, 18, function() DB.speed = step(DB.speed, 0.1); refresh() end)
-plusBtn:SetPoint("TOPRIGHT", more, "TOPRIGHT", -8, -8)
+plusBtn:SetPoint("TOPRIGHT", more, "TOPRIGHT", -8, -32)
 local minusBtn = flat(more, "-", 20, 18, function() DB.speed = step(DB.speed, -0.1); refresh() end)
 minusBtn:SetPoint("RIGHT", plusBtn, "LEFT", -2, 0)
 
@@ -666,7 +709,7 @@ local startBtn = flat(more, "Start", BW, 22, function()
     or "session started. Set the belt speed with - / + whenever you change it.")
   refresh()
 end)
-startBtn:SetPoint("TOPLEFT", more, "TOPLEFT", 8, -32)
+startBtn:SetPoint("TOPLEFT", more, "TOPLEFT", 8, -56)
 local pauseBtn = flat(more, "Pause", BW, 22, function()
   local s = DB.session
   if not s then return end
@@ -686,12 +729,9 @@ end)
 stopBtn:SetPoint("LEFT", pauseBtn, "RIGHT", 2, 0)
 
 local openSettings                -- defined with the settings page below
-local settingsBtn = flat(more, "Settings", 70, 16, function() openSettings() end)
-settingsBtn:SetPoint("TOPRIGHT", more, "TOPRIGHT", -8, -60)
+local settingsBtn = flat(more, "Settings", 66, 18, function() openSettings() end)
+settingsBtn:SetPoint("TOPRIGHT", more, "TOPRIGHT", -8, -8)
 settingsBtn:GetFontString():SetFont(FONT, 10, "")
-local modeFs = label(more, 10, "")
-modeFs:SetPoint("TOPLEFT", more, "TOPLEFT", 10, -63)
-modeFs:SetTextColor(0.55, 0.55, 0.52)
 
 ---------------------------------------------------------------------------------
 -- Settings page: Esc > Options > AddOns > Windrunner (or the Settings button / /wr settings)
@@ -750,16 +790,12 @@ subFs:SetText("Walk on your treadmill while you play.")
 subFs:SetTextColor(0.7, 0.7, 0.68)
 
 heading("Treadmill", -64)
-local manualBtn = flat(panel, "Manual", 70, 20, function()
-  if DB.mode ~= "manual" then DB.mode = "manual"; say("Manual mode: any treadmill, set your belt speed with - / +.") end
-  refresh()
-end)
-manualBtn:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -82)
-local appBtn = flat(panel, "App", 70, 20, function()
-  if DB.mode ~= "app" then DB.mode = "app"; say("App mode: the treadmill follows your character (needs WalkingPad Control).") end
-  refresh()
-end)
-appBtn:SetPoint("LEFT", manualBtn, "RIGHT", 2, 0)
+local panelModeBtns = {}
+for i, m in ipairs({ { "manual", "Manual" }, { "app", "App" }, { "off", "Off" } }) do
+  local b = flat(panel, m[2], 70, 20, function() setMode(m[1]) end)
+  b:SetPoint("TOPLEFT", panel, "TOPLEFT", 16 + (i - 1) * 72, -82)
+  panelModeBtns[m[1]] = b
+end
 local modeHelp = label(panel, 10, "")
 modeHelp:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, -108)
 modeHelp:SetWidth(310)
@@ -930,40 +966,50 @@ end
 refresh = function()
   local s = DB.session
   local app = DB.mode == "app"
+  local off = DB.mode == "off"
+  local manual = DB.mode == "manual"
 
   -- compact view
   timeFs:SetText(fmtTime(s and s.time or 0))
   if s and s.paused then timeFs:SetTextColor(1, 0.6, 0.2) elseif s then timeFs:SetTextColor(1, 1, 1)
   else timeFs:SetTextColor(0.6, 0.6, 0.6) end
   local name, hex = playerName()
-  distFs:SetText(string.format("|cffffffff%s|r |cff999999You|r  |cff666666/|r  |c%s%s|r |cff999999%s|r",
-    fmtDist(s and s.real or 0), hex, fmtDist(s and s.char or 0), name))
-  lockFs:SetText(blocked and "|cffff4040LOCKED|r" or (s and s.paused and "|cffff9933PAUSED|r") or "")
+  if off then
+    timeFs:SetTextColor(0.4, 0.4, 0.4)
+    distFs:SetText("|cff777777Windrunner is off|r")
+  else
+    distFs:SetText(string.format("|cffffffff%s|r |cff999999You|r  |cff666666/|r  |c%s%s|r |cff999999%s|r",
+      fmtDist(s and s.real or 0), hex, fmtDist(s and s.char or 0), name))
+  end
+  lockFs:SetText(off and "|cff888888OFF|r" or blocked and "|cffff4040LOCKED|r"
+    or (s and s.paused and "|cffff9933PAUSED|r") or "")
 
   -- controls
   local open = DB.expanded
   more:SetShown(open)
-  ui:SetHeight(COMPACT_H + (open and 86 or 0))
+  ui:SetHeight(COMPACT_H + (open and (off and 62 or 84) or 0))
   expandBtn:SetNormalTexture(open and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
-  minusBtn:SetShown(not app)
-  plusBtn:SetShown(not app)
-  modeFs:SetText(app and "App mode · WalkingPad Control" or "Manual mode · any treadmill")
+  for m, b in pairs(modeBtns) do b:SetOn(DB.mode == m) end
+  minusBtn:SetShown(manual)
+  plusBtn:SetShown(manual)
+  for _, w in ipairs({ beltFs, startBtn, pauseBtn, stopBtn }) do w:SetShown(not off) end
+  offFs:SetShown(off)
 
   -- settings page
-  manualBtn:SetOn(not app)
-  appBtn:SetOn(app)
+  for m, b in pairs(panelModeBtns) do b:SetOn(DB.mode == m) end
   modeHelp:SetText(app and "Press Start, then your treadmill follows your character. Needs WalkingPad Control on \"Belt follows game\"."
+    or off and "Windrunner does nothing: no tracking, no reminders, no Hardcore, and the treadmill is left alone."
     or "Any treadmill: press Start and set your belt speed with - / +.")
   for _, w in ipairs(speedWidgets) do w:SetShown(app) end
   for key, fs in pairs(speedRows) do fs:SetText(fmtSpeed(DB[key])) end
-  for _, cb in ipairs({ warnBox, hardBox }) do cb:SetShown(not app); cb.text:SetShown(not app) end
+  for _, cb in ipairs({ warnBox, hardBox }) do cb:SetShown(manual); cb.text:SetShown(manual) end
   combatBox:SetShown(app); combatBox.text:SetShown(app)
-  local ey = app and -240 or -196                  -- Extras sit right under the mode's own options
+  local ey = app and -240 or manual and -196 or -136  -- Extras sit right under the mode's own options
   extrasHead:ClearAllPoints(); extrasHead:SetPoint("TOPLEFT", panel, "TOPLEFT", 16, ey)
   loreBox:ClearAllPoints(); loreBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, ey - 18)
   loreMinus:ClearAllPoints(); loreMinus:SetPoint("TOPLEFT", panel, "TOPLEFT", 236, ey - 20)
   milesBox:ClearAllPoints(); milesBox:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, ey - 42)
-  panel:SetHeight(app and 330 or 286)
+  panel:SetHeight(app and 330 or manual and 286 or 226)
   loreBox:SetChecked(DB.lore)
   loreBox.text:SetText(string.format("Lore messages every %s %s", DB.loreEvery, DB.units == "mi" and "mi" or "km"))
   milesBox:SetChecked(DB.units == "mi")
@@ -1023,6 +1069,16 @@ bridge:SetScript("OnUpdate", function(_, dt)
   local st = charState()
   lastState = st
   updateSquares(st)
+  if DB.mode == "off" then
+    anim.kind, anim.kmh = "idle", 0
+    if offUntil > 0 and GetTime() >= offUntil then offUntil = 0; showSquares(stripWanted()) end
+    uiAcc = uiAcc + stepT
+    if uiAcc >= 0.25 then
+      uiAcc = 0
+      if ui:IsShown() then refresh() else updateBlock() end
+    end
+    return
+  end
   local app = DB.mode == "app"
 
   -- App mode: STARTING to move starts the session (or resumes it) and so the treadmill.
@@ -1032,7 +1088,7 @@ bridge:SetScript("OnUpdate", function(_, dt)
   -- Sessions only start with the Start button (never by moving). Moving without one: remind.
   if app and st.moving and not walkingNow() then
     warn("|cffff3333Start a session to start moving the belt!|r")
-  elseif not app and DB.warn and st.moving and onFoot(st) and not walkingNow() then
+  elseif DB.mode == "manual" and DB.warn and st.moving and onFoot(st) and not walkingNow() then
     warn("|cffff3333Your character is walking but you are not!|r")
   end
 
@@ -1099,6 +1155,7 @@ bridge:SetScript("OnEvent", function(_, event, arg1)
     ClearOverrideBindings(blockOwner)      -- always free movement in combat
     blocked = false
   elseif event == "PLAYER_REGEN_ENABLED" then
+    if unbindPending then unbindLink() end
     bindLink()
     updateBlock(true)
   elseif event == "UPDATE_BINDINGS" then
@@ -1114,7 +1171,8 @@ bridge:SetScript("OnEvent", function(_, event, arg1)
     for k, v in pairs(DEFAULTS) do
       if DB[k] == nil then DB[k] = type(v) == "table" and {} or v end
     end
-    showSquares(DB.bridge)
+    if DB.mode ~= "manual" and DB.mode ~= "app" and DB.mode ~= "off" then DB.mode = "manual" end
+    showSquares(stripWanted())
     ui:SetShown(DB.tracker)
     refresh()
   elseif event == "PLAYER_ENTERING_WORLD" then
@@ -1136,6 +1194,10 @@ SLASH_WINDRUNNER1 = "/wr"
 SLASH_WINDRUNNER2 = "/windrunner"
 SlashCmdList.WINDRUNNER = function(msg)
   msg = (msg or ""):lower():match("^%s*(.-)%s*$")
+  if msg == "off" or msg == "manual" or msg == "app" then
+    setMode(msg)
+    return
+  end
   if msg == "settings" or msg == "options" or msg == "config" then
     openSettings()
     return
@@ -1163,7 +1225,7 @@ SlashCmdList.WINDRUNNER = function(msg)
     end
   elseif msg == "sync" then
     DB.bridge = not DB.bridge
-    showSquares(DB.bridge)
+    showSquares(stripWanted())
     say(DB.bridge and "sync squares shown." or "sync squares hidden (App mode won't work).")
   elseif msg == "hardcore" then
     DB.hardcore = not DB.hardcore

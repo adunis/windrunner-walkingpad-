@@ -1641,10 +1641,15 @@ class GameMode:
             else:
                 if self.link:                          # addon visible again but in Manual mode
                     self.link = False
-                    self.pad.log("Windrunner is in Manual mode — the app no longer drives the belt from WoW")
+                    self.pad.log("Windrunner is in Manual or Off mode — the app no longer drives the belt from WoW")
                     if self.pad.belt_on:
                         self.pad.stop("Stopping the belt")
-                self.follow_step()
+                if r is not None and "app_mode" in r:
+                    # Windrunner is on screen but in Manual / Off: it does not want the belt driven
+                    self.idle_since = None
+                    self.input_desc = "Windrunner is in Manual or Off mode — belt left alone (switch it to App)"
+                else:
+                    self.follow_step()
             now = time.time()
             if now - last_pub > 0.25:
                 last_pub = now

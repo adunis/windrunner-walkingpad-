@@ -13,8 +13,8 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
 
 ## Download
 
-- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261112-1252)
-- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v3.1)
+- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261116-0953)
+- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v3.2)
 
 - **App:** unzip and run `WalkingPad.exe`. Windows SmartScreen may warn because it isn't signed:
   *More info → Run anyway*. Close the KS Fit / Mi Home app first — the pad accepts one connection.
@@ -39,9 +39,11 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
 ## Windrunner (WoW addon)
 
 - Compact window: walking / running figure, time, and *"5.00 km You / 3.00 km Thrall"*.
-  Right-click or **+** for Start / Pause / Stop. **Settings** (or `/wr settings`, or Esc → Options →
-  AddOns → Windrunner) holds the setup: Manual / App, that mode's options, lore messages, miles.
+  Right-click or **+** for the **Manual / App / Off** switch and Start / Pause / Stop. **Settings** (or
+  `/wr settings`, or Esc → Options → AddOns → Windrunner) holds each mode's options, lore messages, miles.
 - **Manual mode** — any treadmill: Start / Pause / Stop and set your belt speed.
+- **Off** — Windrunner does nothing: no tracking, reminders, Hardcore or lore, the F11 / F12 / numpad /
+  keys go back to your own bindings, and WalkingPad Control leaves the belt alone. Also `/wr off`.
 - **App mode** — press **Start**, then WalkingPad Control drives the belt from your character. Without a
   running session the belt never moves; moving your character shows *"Start a session to start moving the belt!"*
 - **Hardcore** (Manual mode) — movement keys locked unless a session runs. Never in combat.
@@ -51,7 +53,7 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
   distance are tracked separately. The lines are original, written in the spirit of Azeroth
   (`addon/Windrunner/Lore.lua`).
   `/wr lore` toggles them, `/wr every 1` changes the interval, `/wr testlore` previews one.
-- Commands: `/wr`, `/wr history`, `/wr miles`, `/wr warn`, `/wr hardcore`, `/wr lore`, `/wr every <km>`, `/wr testlore`, `/wr sync`, `/wr debug`.
+- Commands: `/wr`, `/wr manual`, `/wr app`, `/wr off`, `/wr history`, `/wr miles`, `/wr warn`, `/wr hardcore`, `/wr lore`, `/wr every <km>`, `/wr testlore`, `/wr sync`, `/wr debug`.
 - Works on Retail, Forever and Classic clients.
 
 ## How the link works
