@@ -52,6 +52,10 @@ From the **[latest release](https://github.com/adunis/windrunner-walkingpad-/rel
   time and distance, your character's route drawn on each zone map, and **Places**: how far you walked
   in each zone, dungeon, raid, battleground or delve (*"0.84 km inside The Deadmines"*). **All sessions**
   adds them up. WoW hides your position inside instances, so there the distance is kept but no route.
+- **Route on the world map** — your route is also drawn on the big world map (M): live while a session
+  runs, or any saved session with **Show on world map**. Works with Blizzard's map and with
+  [OpenMap](https://www.curseforge.com/wow/addons/openmap)'s stitched map (it has a *Windrunner route*
+  switch in OpenMap's menu). `/wr route` turns it on or off.
 
   ![Sessions window](docs/sessions_window.png)
 - **Hardcore** (Manual mode) — movement keys locked unless a session runs. Never in combat.
@@ -61,7 +65,7 @@ From the **[latest release](https://github.com/adunis/windrunner-walkingpad-/rel
   distance are tracked separately. The lines are original, written in the spirit of Azeroth
   (`addon/Windrunner/Lore.lua`).
   `/wr lore` toggles them, `/wr every 1` changes the interval, `/wr testlore` previews one.
-- Commands: `/wr`, `/wr manual`, `/wr app`, `/wr off`, `/wr sessions`, `/wr miles`, `/wr warn`, `/wr hardcore`, `/wr lore`, `/wr every <km>`, `/wr testlore`, `/wr sync`, `/wr debug`.
+- Commands: `/wr`, `/wr manual`, `/wr app`, `/wr off`, `/wr sessions`, `/wr route`, `/wr miles`, `/wr warn`, `/wr hardcore`, `/wr lore`, `/wr every <km>`, `/wr testlore`, `/wr sync`, `/wr debug`.
 - Works on Retail, Forever and Classic clients.
 
 ## How the link works

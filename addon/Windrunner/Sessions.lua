@@ -301,8 +301,13 @@ local function build()
   win.mapNext:SetPoint("TOPLEFT", X0 + MAP_W - 28, -100 - MAP_H - 6)
   win.mapName = label(win, 11)
   win.mapName:SetPoint("TOP", win, "TOPLEFT", X0 + MAP_W / 2, -100 - MAP_H - 10)
+  win.worldBtn = flat(win, "Show on world map", 130, 20, function()
+    if win.rec and NS.showOnWorldMap then NS.showOnWorldMap(win.rec, win.rec.mapOrder and win.rec.mapOrder[mapIndex]) end
+  end)
+  win.worldBtn:SetPoint("TOPLEFT", X0, -100 - MAP_H - 32)
+  win.worldBtn:GetFontString():SetFont(F, 10, "")
   win.hint = label(win, 10)
-  win.hint:SetPoint("TOPLEFT", X0, -100 - MAP_H - 34)
+  win.hint:SetPoint("TOPLEFT", X0, -100 - MAP_H - 58)
   win.hint:SetWidth(MAP_W)
   win.hint:SetWordWrap(true)
   win.hint:SetTextColor(0.55, 0.55, 0.52)
@@ -495,7 +500,7 @@ function NS.refreshSessions()
     win.stats:SetText(string.format("%d session%s · %s on the treadmill · you %s (%s walked, %s run) · characters %s "
       .. "(%s on foot) · longest session %s", tot.n, tot.n == 1 and "" or "s", fmtTime(tot.time), fmtDist(tot.real), fmtDist(tot.walked),
       fmtDist(tot.ran), fmtDist(tot.char), fmtDist(tot.foot), fmtDist(tot.longest)))
-    win.box:Hide(); win.mapPrev:Hide(); win.mapNext:Hide(); win.mapName:Hide(); win.hint:Hide()
+    win.box:Hide(); win.mapPrev:Hide(); win.mapNext:Hide(); win.mapName:Hide(); win.hint:Hide(); win.worldBtn:Hide()
     placeRows(sortedPlaces(tot.places), X0, WW - X0 - 14, true)
     return
   end
@@ -506,6 +511,8 @@ function NS.refreshSessions()
     fmtTime(rec.time or 0), fmtDist(rec.real or 0), fmtDist(rec.walked or 0), fmtDist(rec.ran or 0),
     fmtDist(rec.char or 0), fmtDist(rec.foot or 0), rec.mode == "app" and "App" or "Manual"))
   win.box:Show(); win.mapName:Show(); win.hint:Show()
+  win.rec = rec
+  win.worldBtn:SetShown(rec.mapOrder ~= nil and #rec.mapOrder > 0)
   drawMap(rec)
   placeRows(sortedPlaces(rec.places), X0 + MAP_W + 18, WW - X0 - MAP_W - 32, false)
 end

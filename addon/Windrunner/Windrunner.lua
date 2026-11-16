@@ -16,6 +16,7 @@
 -- /wr           show or hide the window     /wr settings  open the settings page
 -- /wr manual | app | off    switch mode (off: Windrunner does nothing at all)
 -- /wr sessions  the Sessions window: every session, places (dungeons too) and routes on the map
+-- /wr route     your route on the world map (and OpenMap) on / off
 -- /wr miles     switch km / miles
 -- /wr warn      toggle the warning      /wr hardcore   toggle Hardcore
 -- /wr combat    toggle Combat Crawl (App mode only)
@@ -42,6 +43,7 @@ local DEFAULTS = {
   expanded = false, runFrom = 4.5,     -- figure runs / distance counts as "run" from this belt speed
   lore = true, loreEvery = 0.5,        -- lore subtitles every this many km (or miles)
   combatCrawl = true,                  -- force crawl mode in combat
+  mapRoute = true,                     -- route on the world map (and OpenMap)
   session = nil, sessions = {},
 }
 local DB
@@ -1211,6 +1213,10 @@ SlashCmdList.WINDRUNNER = function(msg)
   end
   if msg == "settings" or msg == "options" or msg == "config" then
     openSettings()
+    return
+  end
+  if msg == "route" then
+    if NS.toggleWorldRoute then say(NS.toggleWorldRoute() and "route on the world map: on." or "route on the world map: off.") end
     return
   end
   if msg == "sessions" or msg == "history" then
