@@ -1,11 +1,15 @@
-# Publishes a GitHub Release when a version tag (v3.3, v3.4...) is pushed:
+# Publishes a GitHub Release for each new Windrunner version.
+# Runs on every push to main (and by hand from the Actions tab). The version comes from
+# "## Version:" in addon/Windrunner/Windrunner.toc; if release v<version> doesn't exist yet it is
+# created with:
 #   WalkingPad.exe  (from downloads/WalkingPad.zip, built with winbuild)
 #   Windrunner.zip  (the addon folder, packed from addon/Windrunner)
 # Notes come from RELEASE_NOTES.md.
 name: Release
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -13,16 +17,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Version
+        id: v
+        run: |
+          VER=$(sed -n 's/^## Version: *//p' addon/Windrunner/Windrunner.toc | tr -d '\r')
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+          echo "Windrunner $VER"
+      - name: Already released?
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.v.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=yes" >> "$GITHUB_OUTPUT"; echo "${{ steps.v.outputs.tag }} is already released"
+          else
+            echo "exists=no" >> "$GITHUB_OUTPUT"
+          fi
       - name: Package
+        if: steps.check.outputs.exists == 'no'
         run: |
           mkdir out
           (cd addon && zip -qr ../out/Windrunner.zip Windrunner)
           unzip -q downloads/WalkingPad.zip -d out
           ls -la out
       - name: Publish
+        if: steps.check.outputs.exists == 'no'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" out/WalkingPad.exe out/Windrunner.zip \
-            --title "Windrunner ${GITHUB_REF_NAME#v} + WalkingPad Control" \
-            --notes-file RELEASE_NOTES.md --latest
+          TAG="${{ steps.v.outputs.tag }}"
+          gh release create "$TAG" out/WalkingPad.exe out/Windrunner.zip --target "$GITHUB_SHA" \
+            --title "Windrunner ${TAG#v} + WalkingPad Control" --notes-file RELEASE_NOTES.md --latest
