@@ -13,10 +13,12 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
 
 ## Download
 
-- **[WalkingPad.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/WalkingPad.zip)** — the Windows app (build 20261116-0953)
-- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/raw/main/downloads/Windrunner.zip)** — the WoW addon (v3.2)
+From the **[latest release](https://github.com/adunis/windrunner-walkingpad-/releases/latest)**:
 
-- **App:** unzip and run `WalkingPad.exe`. Windows SmartScreen may warn because it isn't signed:
+- **[WalkingPad.exe](https://github.com/adunis/windrunner-walkingpad-/releases/latest/download/WalkingPad.exe)** — the Windows app
+- **[Windrunner.zip](https://github.com/adunis/windrunner-walkingpad-/releases/latest/download/Windrunner.zip)** — the WoW addon folder
+
+- **App:** run `WalkingPad.exe`. Windows SmartScreen may warn because it isn't signed:
   *More info → Run anyway*. Close the KS Fit / Mi Home app first — the pad accepts one connection.
 - **Addon:** unzip into `World of Warcraft\_retail_\Interface\AddOns` (or `_forever_`, `_classic_era_`…),
   so you get `AddOns\Windrunner\Windrunner.toc`. Or click **Install Windrunner** in the app.
@@ -46,6 +48,12 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
   keys go back to your own bindings, and WalkingPad Control leaves the belt alone. Also `/wr off`.
 - **App mode** — press **Start**, then WalkingPad Control drives the belt from your character. Without a
   running session the belt never moves; moving your character shows *"Start a session to start moving the belt!"*
+- **Sessions** — the **Sessions** button (or `/wr sessions`) opens your history: every session with its
+  time and distance, your character's route drawn on each zone map, and **Places**: how far you walked
+  in each zone, dungeon, raid, battleground or delve (*"0.84 km inside The Deadmines"*). **All sessions**
+  adds them up. WoW hides your position inside instances, so there the distance is kept but no route.
+
+  ![Sessions window](docs/sessions_window.png)
 - **Hardcore** (Manual mode) — movement keys locked unless a session runs. Never in combat.
 - **Lore messages** (on by default) — every 0.5 km a line in the spirit of Azeroth appears like a subtitle
   at the bottom of the screen, with your distance. Each class and race has its own lines — a Troll Priest
@@ -53,7 +61,7 @@ Demo: https://www.youtube.com/watch?v=BBa3kIVbj6k&t=34s
   distance are tracked separately. The lines are original, written in the spirit of Azeroth
   (`addon/Windrunner/Lore.lua`).
   `/wr lore` toggles them, `/wr every 1` changes the interval, `/wr testlore` previews one.
-- Commands: `/wr`, `/wr manual`, `/wr app`, `/wr off`, `/wr history`, `/wr miles`, `/wr warn`, `/wr hardcore`, `/wr lore`, `/wr every <km>`, `/wr testlore`, `/wr sync`, `/wr debug`.
+- Commands: `/wr`, `/wr manual`, `/wr app`, `/wr off`, `/wr sessions`, `/wr miles`, `/wr warn`, `/wr hardcore`, `/wr lore`, `/wr every <km>`, `/wr testlore`, `/wr sync`, `/wr debug`.
 - Works on Retail, Forever and Classic clients.
 
 ## How the link works

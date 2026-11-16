@@ -15,7 +15,7 @@
 --
 -- /wr           show or hide the window     /wr settings  open the settings page
 -- /wr manual | app | off    switch mode (off: Windrunner does nothing at all)
--- /wr history   last sessions in chat
+-- /wr sessions  the Sessions window: every session, places (dungeons too) and routes on the map
 -- /wr miles     switch km / miles
 -- /wr warn      toggle the warning      /wr hardcore   toggle Hardcore
 -- /wr combat    toggle Combat Crawl (App mode only)
@@ -27,6 +27,8 @@
 -- F11 (0) / F12 (1): km/h x10 in 6 bits + a parity bit. Windrunner uses F11/F12 for that.
 -- "Pad drives the game": the app switches walk/run with numpad / (bound to Toggle Run/Walk here).
 
+local _, NS = ...
+if type(NS) ~= "table" then NS = _G.WindrunnerNS or {}; _G.WindrunnerNS = NS end   -- shared with Sessions.lua
 local YARD_KM = 0.0009144
 local MILE_KM = 1.609344
 local BASE_SPEED = BASE_MOVEMENT_SPEED or 7
@@ -470,6 +472,8 @@ local function flat(parent, text, w, h, onClick)
   return b
 end
 
+NS.FONT, NS.fmtDist, NS.fmtTime, NS.flat, NS.label, NS.ACCENT = FONT, fmtDist, fmtTime, flat, label, ACCENT
+
 -- the little runner on a treadmill belt (compact view only)
 local fig = CreateFrame("Frame", nil, ui)
 fig:SetSize(44, COMPACT_H - 4)
@@ -641,11 +645,14 @@ local function endSession()
   local s = DB.session
   if not s then return end
   if s.time >= 30 then
-    table.insert(DB.sessions, 1, {
+    local rec = {
       date = date("%Y-%m-%d %H:%M", s.started), time = s.time, real = s.real,
       char = s.char, foot = s.foot, mode = DB.mode, walked = s.walked or 0, ran = s.ran or 0,
-    })
+    }
+    if NS.finish then NS.finish(s, rec) end
+    table.insert(DB.sessions, 1, rec)
     while #DB.sessions > 200 do table.remove(DB.sessions) end
+    if NS.prune then NS.prune(DB.sessions) end
     say(string.format("session saved: %s, %s (%s walked, %s run). Your character travelled %s (%s on foot).",
       fmtTime(s.time), fmtDist(s.real), fmtDist(s.walked or 0), fmtDist(s.ran or 0), fmtDist(s.char), fmtDist(s.foot)))
   else
@@ -681,8 +688,8 @@ end
 -- Controls (shown with + / right-click): mode, Settings, belt status, Start / Pause / Stop
 local modeBtns = {}
 for i, m in ipairs({ { "manual", "Manual" }, { "app", "App" }, { "off", "Off" } }) do
-  local b = flat(more, m[2], 54, 18, function() setMode(m[1]) end)
-  b:SetPoint("TOPLEFT", more, "TOPLEFT", 8 + (i - 1) * 56, -8)
+  local b = flat(more, m[2], 46, 18, function() setMode(m[1]) end)
+  b:SetPoint("TOPLEFT", more, "TOPLEFT", 8 + (i - 1) * 48, -8)
   modeBtns[m[1]] = b
 end
 
@@ -729,9 +736,12 @@ end)
 stopBtn:SetPoint("LEFT", pauseBtn, "RIGHT", 2, 0)
 
 local openSettings                -- defined with the settings page below
-local settingsBtn = flat(more, "Settings", 66, 18, function() openSettings() end)
+local settingsBtn = flat(more, "Settings", 60, 18, function() openSettings() end)
 settingsBtn:SetPoint("TOPRIGHT", more, "TOPRIGHT", -8, -8)
 settingsBtn:GetFontString():SetFont(FONT, 10, "")
+local sessionsBtn = flat(more, "Sessions", 60, 18, function() if NS.openSessions then NS.openSessions(true) end end)
+sessionsBtn:SetPoint("RIGHT", settingsBtn, "LEFT", -4, 0)
+sessionsBtn:GetFontString():SetFont(FONT, 10, "")
 
 ---------------------------------------------------------------------------------
 -- Settings page: Esc > Options > AddOns > Windrunner (or the Settings button / /wr settings)
@@ -1125,6 +1135,7 @@ bridge:SetScript("OnUpdate", function(_, dt)
     local km = st.speed * stepT * YARD_KM
     s.char = s.char + km
     if onFoot(st) then s.foot = s.foot + km end
+    if NS.track then NS.track(s, st, d, km, stepT) end   -- places + route (Sessions.lua)
   end
 
   uiAcc = uiAcc + stepT
@@ -1202,7 +1213,8 @@ SlashCmdList.WINDRUNNER = function(msg)
     openSettings()
     return
   end
-  if msg == "history" then
+  if msg == "sessions" or msg == "history" then
+    if NS.openSessions then NS.openSessions() return end
     if #DB.sessions == 0 then say("no sessions yet.") return end
     say("last sessions:")
     for i = 1, math.min(10, #DB.sessions) do
