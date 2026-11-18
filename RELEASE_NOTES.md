@@ -3,7 +3,14 @@
 - **WalkingPad.exe**: the Windows app. Just run it. If SmartScreen warns, choose *More info → Run anyway*.
 - **Windrunner.zip**: the WoW addon. Unzip it into `World of Warcraft\_retail_\Interface\AddOns` (or `_forever_`, `_classic_era_`…), so you get `AddOns\Windrunner\Windrunner.toc`.
 
-## New in Windrunner 3.6
+## New in Windrunner 3.6.1
+
+- **Fixed: the window disappearing after a photo**:
+  - Addons that hide the HUD (like Forever Photo Mode) sometimes left Windrunner's window, and the black and white strip the app reads, invisible.
+  - Once the rest of your UI is back, Windrunner now brings them back too. It waits while a photo is being taken.
+  - Typing `/wr` on an invisible window also shows it again.
+
+## Windrunner 3.6
 
 - **The game's own look**:
   - The tracker uses a tooltip-style frame, WoW's red buttons, and gold and white text with the game's shadow.

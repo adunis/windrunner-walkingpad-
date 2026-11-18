@@ -1181,6 +1181,50 @@ end
 -- Ticking
 ---------------------------------------------------------------------------------
 local acc, uiAcc, wasMoving = 0, 0, false
+-- UI-hiding addons (ForeverPhotoMode and the like) hide the HUD by setting every frame's alpha to 0
+-- and restore it afterwards; when a restore goes wrong, Windrunner's window (and the black / white
+-- strip the app reads) stay invisible while everything keeps running. Windrunner never fades these
+-- itself, so once the rest of the UI is visible again (and no photo is being taken) they come back.
+local function alphaOf(f)
+  if not f or not f.GetAlpha then return nil end
+  local ok, a = pcall(f.GetAlpha, f)
+  if not ok or type(a) ~= "number" or (issecretvalue and issecretvalue(a)) then return nil end
+  return a
+end
+local function photoBusy()
+  local P = rawget(_G, "ForeverPhotoMode")
+  if type(P) ~= "table" then return false end
+  return (P.active or P.maskedFrames ~= nil or P.pendingHUDRestore ~= nil or P.restoreGuardRemaining ~= nil) and true or false
+end
+local function restOfUIVisible()
+  if UIParent.IsShown and not UIParent:IsShown() then return false end
+  local seen = false
+  for _, name in ipairs({ "PlayerFrame", "MinimapCluster", "MainMenuBar", "ChatFrame1" }) do
+    local f = rawget(_G, name)
+    if type(f) == "table" and f.IsShown and f:IsShown() then
+      local a = alphaOf(f)
+      if a then
+        if a > 0.5 then return true end
+        seen = true
+      end
+    end
+  end
+  return not seen        -- no reference frame to compare with: assume the UI is back
+end
+local function healAlpha()
+  local frames = { ui, bridge, rawget(_G, "WindrunnerSessionsFrame") }
+  local hidden = false
+  for _, f in ipairs(frames) do
+    local a = f and f:IsShown() and alphaOf(f)
+    if a and a < 0.99 then hidden = true end
+  end
+  if not hidden or photoBusy() or not restOfUIVisible() then return end
+  for _, f in ipairs(frames) do
+    if f and f:IsShown() and (alphaOf(f) or 1) < 0.99 then f:SetAlpha(1) end
+  end
+end
+NS.healAlpha = healAlpha
+
 bridge:SetScript("OnUpdate", function(_, dt)
   acc = acc + dt
   if acc < 0.05 then return end
@@ -1197,6 +1241,7 @@ bridge:SetScript("OnUpdate", function(_, dt)
     uiAcc = uiAcc + stepT
     if uiAcc >= 0.25 then
       uiAcc = 0
+      healAlpha()
       if ui:IsShown() then refresh() else updateBlock() end
     end
     return
@@ -1253,6 +1298,7 @@ bridge:SetScript("OnUpdate", function(_, dt)
   uiAcc = uiAcc + stepT
   if uiAcc >= 0.25 then
     uiAcc = 0
+    healAlpha()
     if ui:IsShown() then refresh() else updateBlock() end
   end
 end)
@@ -1406,8 +1452,13 @@ SlashCmdList.WINDRUNNER = function(msg)
     say("units: " .. (DB.units == "km" and "kilometres" or "miles"))
     refresh()
   else
+    if ui:IsShown() and (alphaOf(ui) or 1) < 0.5 then      -- left invisible by another addon: bring it back
+      ui:SetAlpha(1); bridge:SetAlpha(1)
+      refresh()
+      return
+    end
     DB.tracker = not ui:IsShown()
     ui:SetShown(DB.tracker)
-    if DB.tracker then refresh() end
+    if DB.tracker then ui:SetAlpha(1); refresh() end
   end
 end
