@@ -87,7 +87,7 @@ WoW addons can't talk to other programs, so:
 - If WoW runs as administrator, Windows blocks the keys unless the app runs as administrator too
   (the app detects this and offers a restart).
 
-## The Bluetooth protocol
+## Bluetooth protocols
 
 KingSmith "WiLink": notify `fe01`, write `fe02`. Frames `F7 … CRC FD`, CRC = sum of the bytes between
 start and CRC, mod 256. Status `F7 A2 00 00 00 FD`; mode `F7 A2 02 <0 auto|1 manual|2 standby>`;
@@ -95,6 +95,13 @@ speed `F7 A2 01 <km/h×10>`; start `F7 A2 04 01`; settings `F7 A6 <key> 00 <v> <
 (keys 1–9; the pad answers with all settings). On the A1 Pro there's no Bluetooth command for the beep
 or to skip the 3-second start countdown. Built on the work of
 [ph4-walkingpad](https://github.com/ph4r05/ph4-walkingpad).
+
+Standard FTMS treadmills are detected from service `0x1826`. The app reads the advertised target-speed
+feature and supported speed range, requests the Fitness Machine Control Point, then sends acknowledged
+Set Target Speed (`0x02`, hundredths of km/h), Start/Resume (`0x07`) and Stop/Pause (`0x08`)
+commands. Treadmill Data (`0x2ACD`) supplies live speed and available distance/time. FTMS has no
+position-sensing Auto mode and exposes no general beep mute control. The app never starts the belt on
+connect. See [app/ftms.py](app/ftms.py).
 
 ## Flow and UI update (2026-11-11)
 
