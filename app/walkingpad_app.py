@@ -25,6 +25,7 @@ from pathlib import Path
 
 from aiohttp import web, WSMsgType
 from bleak import BleakClient, BleakScanner
+from ftms import FtmsTreadmill, FTMS_SERVICE
 
 PORT = 8765
 BUILD = "dev"   # replaced by the build script
@@ -835,6 +836,8 @@ class Pad:
         self.command_epoch = 0
         self.listeners = set()
         self.has_supplement = False
+        self.protocol = "wilink"
+        self.ftms = None
         self.pending_speed = None   # latest speed wish; older wishes are dropped
         self.hold_until = 0.0       # don't send speed until countdown is over
         self.belt_on = False        # our belief of whether the belt is running
@@ -884,7 +887,8 @@ class Pad:
         self.log("Scanning for a WalkingPad…")
         for d in await BleakScanner.discover(timeout=8.0):
             name = (d.name or "").lower()
-            if "walkingpad" in name or name.startswith("ks-"):
+            if ("walkingpad" in name or name.startswith("ks-") or "domyos" in name
+                    or "run500" in name or "run 500" in name):
                 self.log(f"Found {d.name} ({d.address})")
                 self.state["name"] = d.name
                 return d.address
@@ -927,6 +931,26 @@ class Pad:
                     self.on_external_stop()
             self.push()
 
+    def on_ftms_data(self, sample):
+        speed = sample.get("speed")
+        if speed is None:
+            return
+        now = time.time()
+        self.last_status_time = now
+        was_on = self.belt_on
+        belt = "running" if speed > 0.05 else ("starting" if was_on and now <= self.hold_until + 3 else "stopped")
+        self.state.update(belt=belt, speed=speed, mode="ftms")
+        if sample.get("distance_m") is not None:
+            self.state["distance"] = sample["distance_m"] / 1000
+        if sample.get("elapsed_s") is not None:
+            self.state["time"] = sample["elapsed_s"]
+        if speed <= 0.05 and was_on and now > self.hold_until + 3:
+            self.belt_on = False
+            self.pending_speed = None
+            if self.on_external_stop:
+                self.on_external_stop()
+        self.push()
+
     async def connect_loop(self):
         if self.simulate:                       # --simulate: a pretend treadmill, for testing
             self.client = SimClient(self)
@@ -949,20 +973,35 @@ class Pad:
                 self.push()
                 async with BleakClient(addr, timeout=15.0) as client:
                     self.client = client
-                    await client.start_notify(CHAR_NOTIFY, self.on_notify)
-                    await self.dump_gatt(client)
-                    chars = {c.uuid.lower() for s in client.services for c in s.characteristics}
-                    self.has_supplement = CHAR_SUPPLEMENT in chars
-                    self.state["sound_control"] = self.has_supplement
+                    services = {s.uuid.lower() for s in client.services}
+                    self.protocol = "ftms" if FTMS_SERVICE in services else "wilink"
+                    self.state["protocol"] = self.protocol
+                    if self.protocol == "ftms":
+                        await self.dump_gatt(client, skip_notifications={
+                            "00002acd-0000-1000-8000-00805f9b34fb",
+                            "00002ad9-0000-1000-8000-00805f9b34fb",
+                        })
+                        self.ftms = await FtmsTreadmill(client, self.on_ftms_data, self.log).initialize()
+                        self.has_supplement = False
+                        self.state["sound_control"] = False
+                        self.log("Connected using Bluetooth FTMS. Sound control is not exposed by FTMS.")
+                    else:
+                        await client.start_notify(CHAR_NOTIFY, self.on_notify)
+                        await self.dump_gatt(client)
+                        chars = {c.uuid.lower() for s in client.services for c in s.characteristics}
+                        self.has_supplement = CHAR_SUPPLEMENT in chars
+                        self.state["sound_control"] = self.has_supplement
+                        self.log("Connected." + ("" if self.has_supplement else
+                                 " This pad doesn't expose the buzzer channel, so mute is unavailable."))
                     self.state["connection"] = "connected"
                     if self.on_connected:
                         self.on_connected()
-                    self.log("Connected." + ("" if self.has_supplement else
-                             " This pad doesn't expose the buzzer channel, so mute is unavailable."))
                     await self.worker()
             except Exception as e:
                 self.log(f"Connection lost: {e}")
             self.client = None
+            self.ftms = None
+            self.protocol = "wilink"
             self.cancel_pending()
             self.belt_on = False
             self.target_speed = 0.0
@@ -972,8 +1011,8 @@ class Pad:
             self.push()
             await asyncio.sleep(3)
 
-    async def dump_gatt(self, client):
-        """Map every service/characteristic and listen on all notify channels (Lab)."""
+    async def dump_gatt(self, client, skip_notifications=()):
+        """Map every service/characteristic and listen on notify channels except reserved handlers."""
         gatt = []
         for svc in client.services:
             for c in svc.characteristics:
@@ -983,7 +1022,8 @@ class Pad:
                         entry["value"] = bytes(await client.read_gatt_char(c)).hex(" ")
                     except Exception as e:
                         entry["value"] = f"read failed: {e}"
-                if c.uuid.lower() != CHAR_NOTIFY and ("notify" in c.properties or "indicate" in c.properties):
+                if (c.uuid.lower() != CHAR_NOTIFY and c.uuid.lower() not in skip_notifications
+                        and ("notify" in c.properties or "indicate" in c.properties)):
                     try:
                         await client.start_notify(c, self.on_raw(c.uuid.lower()))
                     except Exception:
@@ -1022,8 +1062,31 @@ class Pad:
             self._enqueue(("raw", char), bytes(data))
 
     async def worker(self):
-        """One command at a time, ≥0.7 s apart. Queued commands (start/stop/mode) go
-        first; then the latest speed wish; otherwise poll stats once a second."""
+        """Serialize commands; FTMS uses acknowledged control-point operations, WiLink is rate-limited."""
+        if self.protocol == "ftms":
+            while self.client and self.client.is_connected:
+                item = self.queue.get_nowait() if not self.queue.empty() else None
+                if item is None and self.pending_speed is not None and time.time() >= self.hold_until:
+                    item = ("ftms_speed", self.pending_speed)
+                    self.pending_speed = None
+                if item is None:
+                    await asyncio.sleep(0.05)
+                    continue
+                kind, payload = item
+                try:
+                    if kind == "ftms_start":
+                        await self.ftms.start(payload)
+                    elif kind == "ftms_stop":
+                        await self.ftms.stop()
+                    elif kind == "ftms_speed":
+                        await self.ftms.set_speed(payload)
+                    elif kind == "ftms_mode":
+                        self.log("FTMS treadmills have no Auto/Manual position-sensing mode.")
+                except Exception as e:
+                    self.log(f"FTMS command failed: {e}")
+                    if not self.client or not self.client.is_connected:
+                        raise
+            return
         last = 0.0
         while self.client and self.client.is_connected:
             now = time.time()
@@ -1074,8 +1137,18 @@ class Pad:
                 self.log("Not connected yet.")
             return
         speed = clamp_speed(speed)
+        if self.protocol == "ftms" and self.ftms:
+            speed = min(self.ftms.maximum_kmh, max(self.ftms.minimum_kmh, speed))
         if self.belt_on:
             return self.set_speed(speed, quiet)
+        if self.protocol == "ftms":
+            self.log(f"Starting FTMS treadmill at {speed:.1f} km/h")
+            self.hold_until = time.time() + 8.0
+            self.pending_speed = None
+            self.target_speed = speed
+            self.belt_on = True
+            self._enqueue("ftms_start", speed)
+            return
         self.log(f"Starting belt (countdown), then {speed:.1f} km/h")
         self._enqueue("wilink", cmd_mode(MODE_MANUAL))
         self._enqueue("wilink", cmd_start())
@@ -1086,6 +1159,9 @@ class Pad:
 
     def start_auto(self):
         """Start the belt in Auto mode (the pad sets the speed from where you walk)."""
+        if self.protocol == "ftms":
+            self.log("FTMS treadmill position-sensing Auto mode is not available.")
+            return
         if not self.connected:
             self.log("Not connected yet.")
             return
@@ -1113,11 +1189,16 @@ class Pad:
         if not self.connected:
             return
         self.log(reason)
-        self._enqueue("wilink", cmd_speed(0))
-        self._enqueue("wilink", cmd_mode(MODE_STANDBY))
+        if self.protocol == "ftms":
+            self._enqueue("ftms_stop", None)
+        else:
+            self._enqueue("wilink", cmd_speed(0))
+            self._enqueue("wilink", cmd_mode(MODE_STANDBY))
 
     def set_speed(self, speed, quiet=False):
         speed = clamp_speed(speed)
+        if self.protocol == "ftms" and self.ftms:
+            speed = min(self.ftms.maximum_kmh, max(self.ftms.minimum_kmh, speed))
         if not quiet:
             self.log(f"Speed → {speed:.1f} km/h")
         self.target_speed = speed
@@ -1149,6 +1230,9 @@ class Pad:
         self.set_pref("child_lock", lock)
 
     def set_mode(self, mode):
+        if self.protocol == "ftms":
+            self.log("FTMS does not provide an Auto/Manual position-sensing mode.")
+            return
         m = {"auto": MODE_AUTO, "manual": MODE_MANUAL, "standby": MODE_STANDBY}[mode]
         self.log(f"Mode → {mode}")
         self._enqueue("wilink", cmd_mode(m))
@@ -1517,7 +1601,7 @@ class GameMode:
         speed = pad.state["speed"]
         fresh = pad.connected and time.time() - pad.last_status_time < 3
         ok, title = game_window_ok(s)
-        auto = pad.state.get("mode") == "auto"        # only Auto-mode walking drives the game
+        auto = pad.protocol == "ftms" or pad.state.get("mode") == "auto"  # FTMS reports belt speed directly
         fwd = fresh and ok and auto and not self.suppressed and speed >= s["rev_move"]
         if fwd and speed >= s["rev_sprint"]:
             self.sprinting = True
