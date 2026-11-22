@@ -977,7 +977,10 @@ class Pad:
                     self.protocol = "ftms" if FTMS_SERVICE in services else "wilink"
                     self.state["protocol"] = self.protocol
                     if self.protocol == "ftms":
-                        await self.dump_gatt(client)
+                        await self.dump_gatt(client, skip_notifications={
+                            "00002acd-0000-1000-8000-00805f9b34fb",
+                            "00002ad9-0000-1000-8000-00805f9b34fb",
+                        })
                         self.ftms = await FtmsTreadmill(client, self.on_ftms_data, self.log).initialize()
                         self.has_supplement = False
                         self.state["sound_control"] = False
@@ -1008,8 +1011,8 @@ class Pad:
             self.push()
             await asyncio.sleep(3)
 
-    async def dump_gatt(self, client):
-        """Map every service/characteristic and listen on all notify channels (Lab)."""
+    async def dump_gatt(self, client, skip_notifications=()):
+        """Map every service/characteristic and listen on notify channels except reserved handlers."""
         gatt = []
         for svc in client.services:
             for c in svc.characteristics:
@@ -1019,7 +1022,8 @@ class Pad:
                         entry["value"] = bytes(await client.read_gatt_char(c)).hex(" ")
                     except Exception as e:
                         entry["value"] = f"read failed: {e}"
-                if c.uuid.lower() != CHAR_NOTIFY and ("notify" in c.properties or "indicate" in c.properties):
+                if (c.uuid.lower() != CHAR_NOTIFY and c.uuid.lower() not in skip_notifications
+                        and ("notify" in c.properties or "indicate" in c.properties)):
                     try:
                         await client.start_notify(c, self.on_raw(c.uuid.lower()))
                     except Exception:
